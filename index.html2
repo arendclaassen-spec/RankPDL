@@ -1,125 +1,1386 @@
--- =====================================================
--- 1. Verwijder ALLE bestaande tabellen (frisse start)
--- =====================================================
-drop table if exists club_settings cascade;
-drop table if exists matches cascade;
-drop table if exists club_memberships cascade;
-drop table if exists clubs cascade;
-drop table if exists players cascade;
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Play Padel Club – Ranking</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --bg:#0a0e13;--surface:#111820;--surface2:#1a2330;
+  --border:rgba(255,255,255,0.08);--border2:rgba(255,255,255,0.14);
+  --text:#f0f4f8;--text2:#7a8fa6;--text3:#4a5f73;
+  --accent:#00d4aa;--accent2:#0099ff;
+  --gold:#f5a623;--silver:#a8b8c8;--bronze:#cd8b4a;--diamond:#7dd3fc;
+  --danger:#ff5b5b;--warn:#f5a623;
+  --r:12px;--rs:8px;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:15px;}
+.app{display:flex;min-height:100vh;}
 
--- =====================================================
--- 2. Zet extensie aan voor UUID en wachtwoord hashing
--- =====================================================
-create extension if not exists "pgcrypto";
+.sidebar{width:220px;background:var(--surface);border-right:1px solid var(--border);padding:1.5rem 1rem;position:fixed;height:100vh;display:flex;flex-direction:column;gap:3px;z-index:100;overflow-y:auto;}
+.logo{padding:0 .75rem 1.25rem;border-bottom:1px solid var(--border);margin-bottom:.5rem;}
+.logo-title{font-size:15px;font-weight:600;letter-spacing:-.3px;}
+.logo-sub{font-size:11px;color:var(--text3);font-family:'DM Mono',monospace;margin-top:2px;}
+.nav-sep{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;padding:1rem .75rem .25rem;margin-top:.25rem;}
+.nav-item{display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:var(--rs);cursor:pointer;transition:all .15s;color:var(--text2);font-size:13px;border:none;background:none;width:100%;text-align:left;}
+.nav-item:hover{background:var(--surface2);color:var(--text);}
+.nav-item.active{background:rgba(0,212,170,.12);color:var(--accent);font-weight:500;}
+.nav-item.admin-item{color:var(--warn);}
+.nav-item.admin-item.active{background:rgba(245,166,35,.1);color:var(--warn);}
+.nav-icon{font-size:15px;width:18px;text-align:center;}
 
--- =====================================================
--- 3. Spelers (CENTRALE gegevens: rating wordt gedeeld over clubs)
--- =====================================================
-create table players (
-  id uuid primary key default gen_random_uuid(),
-  email text not null unique,
-  name text not null,
-  rating numeric(4,2) not null default 9.00 check (rating between 1.0 and 10.0),
-  matches_played int not null default 0 check (matches_played >= 0),
-  wins int not null default 0 check (wins >= 0),
-  created_at timestamptz default now()
-);
+.main{margin-left:220px;flex:1;padding:2rem 2.5rem;max-width:980px;}
+.page{display:none;}.page.active{display:block;}
+.page-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1.75rem;}
+.page-title{font-size:24px;font-weight:600;letter-spacing:-.4px;}
+.page-sub{font-size:13px;color:var(--text2);margin-top:3px;}
 
--- =====================================================
--- 4. Clubs (alleen de club zelf heeft een wachtwoord)
--- =====================================================
-create table clubs (
-  id uuid primary key default gen_random_uuid(),
-  name text not null,
-  slug text not null unique,
-  password_hash text not null,
-  created_at timestamptz default now()
-);
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:1.75rem;}
+.stat-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:1.1rem 1rem;}
+.stat-label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px;}
+.stat-val{font-size:26px;font-weight:600;font-family:'DM Mono',monospace;}
 
--- =====================================================
--- 5. Club lidmaatschappen (welke speler is lid van welke club)
--- =====================================================
-create table club_memberships (
-  id uuid primary key default gen_random_uuid(),
-  player_id uuid not null references players(id) on delete cascade,
-  club_id uuid not null references clubs(id) on delete cascade,
-  joined_at timestamptz not null default now(),
-  unique(player_id, club_id)
-);
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:1.25rem;}
+.card-pad{padding:1.25rem;}
 
--- =====================================================
--- 6. Wedstrijden (per club, maar update centrale spelers)
--- =====================================================
-create table matches (
-  id uuid primary key default gen_random_uuid(),
-  club_id uuid not null references clubs(id) on delete cascade,
-  team_a uuid[] not null,
-  team_b uuid[] not null,
-  score_a int[] not null default '{}',
-  score_b int[] not null default '{}',
-  competitive boolean not null default true,
-  kotc boolean not null default false,
-  kotc_level text check (kotc_level in ('Beginner', 'Bronze', 'Silver', 'Gold', 'Diamond')),
-  kotc_duos jsonb,
-  played_at timestamptz not null default now()
-);
+.rank-table{width:100%;border-collapse:collapse;}
+.rank-table th{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;padding:.7rem 1.25rem;text-align:left;border-bottom:1px solid var(--border);}
+.rank-table td{padding:.8rem 1.25rem;border-bottom:1px solid var(--border);}
+.rank-table tr:last-child td{border-bottom:none;}
+.rank-table tbody tr:hover{background:var(--surface2);}
+.rank-pos{font-family:'DM Mono',monospace;font-size:13px;color:var(--text3);width:36px;}
+.rank-pos.p1{color:var(--gold)}.rank-pos.p2{color:var(--silver)}.rank-pos.p3{color:var(--bronze)}
+.player-cell{display:flex;align-items:center;gap:10px;}
+.avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0;}
+.pname{font-size:14px;font-weight:500;}
+.pemail{font-size:11px;color:var(--text3);}
+.rating-val{font-family:'DM Mono',monospace;font-size:14px;font-weight:500;}
 
--- =====================================================
--- 7. Club instellingen (promoties teller, etc.)
--- =====================================================
-create table club_settings (
-  club_id uuid not null references clubs(id) on delete cascade,
-  key text not null,
-  value text not null,
-  primary key (club_id, key)
-);
+.badge{font-size:11px;font-weight:500;padding:2px 9px;border-radius:20px;letter-spacing:.2px;}
+.lv-beginner{background:rgba(122,143,166,.15);color:var(--text2);border:1px solid rgba(122,143,166,.25);}
+.lv-bronze{background:rgba(205,139,74,.15);color:var(--bronze);border:1px solid rgba(205,139,74,.3);}
+.lv-silver{background:rgba(168,184,200,.15);color:var(--silver);border:1px solid rgba(168,184,200,.3);}
+.lv-gold{background:rgba(245,166,35,.15);color:var(--gold);border:1px solid rgba(245,166,35,.3);}
+.lv-diamond{background:rgba(125,211,252,.15);color:var(--diamond);border:1px solid rgba(125,211,252,.3);}
 
--- =====================================================
--- 8. Indexen voor snellere queries
--- =====================================================
-create index idx_players_email on players(email);
-create index idx_clubs_slug on clubs(slug);
-create index idx_memberships_player on club_memberships(player_id);
-create index idx_memberships_club on club_memberships(club_id);
-create index idx_matches_club on matches(club_id);
-create index idx_matches_played_at on matches(played_at desc);
+.filter-bar{display:flex;gap:7px;margin-bottom:1.25rem;flex-wrap:wrap;}
+.filter-btn{padding:5px 13px;border-radius:20px;font-size:12px;border:1px solid var(--border);background:transparent;cursor:pointer;color:var(--text2);transition:all .15s;font-family:'DM Sans',sans-serif;}
+.filter-btn:hover{border-color:var(--border2);color:var(--text);}
+.filter-btn.active{background:var(--accent);border-color:var(--accent);color:#000;font-weight:500;}
 
--- =====================================================
--- 9. Jouw eigen club "PlayPDL" toevoegen
--- =====================================================
--- Wachtwoord is: admin123 (in platte tekst - later kun je hashing toevoegen)
-insert into clubs (name, slug, password_hash) 
-values ('PlayPDL', 'playpdl', 'admin123');
+.form-group{margin-bottom:.875rem;}
+.form-label{font-size:12px;color:var(--text2);margin-bottom:5px;display:block;}
+.form-control{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--rs);padding:9px 11px;color:var(--text);font-size:14px;font-family:'DM Sans',sans-serif;transition:border-color .15s;outline:none;}
+.form-control:focus{border-color:var(--accent);}
+.form-control option{background:var(--surface2);}
 
--- =====================================================
--- 10. Club instellingen (promoties teller start op 0)
--- =====================================================
-insert into club_settings (club_id, key, value)
-values ((select id from clubs where slug = 'playpdl'), 'promos', '0');
+.player-search-wrap{position:relative;}
+.player-search-input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--rs);padding:9px 11px;color:var(--text);font-size:14px;font-family:'DM Sans',sans-serif;outline:none;}
+.player-search-input:focus{border-color:var(--accent);}
+.player-dropdown{position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border2);border-radius:var(--rs);z-index:200;max-height:200px;overflow-y:auto;display:none;margin-top:2px;}
+.player-dropdown.open{display:block;}
+.pd-item{padding:9px 12px;cursor:pointer;font-size:13px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);}
+.pd-item:last-child{border-bottom:none;}
+.pd-item:hover{background:var(--surface2);}
+.pd-name{color:var(--text);font-weight:500;}
+.pd-empty{padding:12px;font-size:13px;color:var(--text3);text-align:center;}
 
--- =====================================================
--- 11. Testdata: voeg een paar voorbeeldspelers toe
--- =====================================================
--- Speler 1
-insert into players (email, name, rating, matches_played, wins) 
-values ('jan.jansen@example.nl', 'Jan Jansen', 7.5, 5, 3);
+.btn{padding:10px 20px;border-radius:var(--rs);font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all .15s;font-family:'DM Sans',sans-serif;}
+.btn-accent{background:var(--accent);color:#000;}
+.btn-accent:hover{opacity:.85;}
+.btn-accent:disabled{opacity:.4;cursor:not-allowed;}
+.btn-outline{background:transparent;color:var(--text2);border:1px solid var(--border);}
+.btn-outline:hover{border-color:var(--border2);color:var(--text);background:var(--surface2);}
+.btn-danger{background:rgba(255,91,91,.15);color:var(--danger);border:1px solid rgba(255,91,91,.3);}
+.btn-danger:hover{background:rgba(255,91,91,.25);}
+.btn-warn{background:rgba(245,166,35,.15);color:var(--warn);border:1px solid rgba(245,166,35,.3);}
+.btn-warn:hover{background:rgba(245,166,35,.25);}
+.btn-full{width:100%;margin-top:.5rem;}
+.btn-sm{padding:6px 12px;font-size:12px;}
 
--- Speler 2
-insert into players (email, name, rating, matches_played, wins) 
-values ('maria.devries@example.nl', 'Maria de Vries', 8.2, 8, 4);
+.match-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-bottom:1.25rem;}
+.team-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:1.25rem;}
+.team-label{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.8px;color:var(--text2);margin-bottom:.875rem;}
+.team-a .team-label{color:var(--accent);}
+.team-b .team-label{color:var(--accent2);}
+.sets-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:1.25rem;margin-bottom:1.25rem;}
+.set-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+.set-label{font-size:12px;color:var(--text3);min-width:52px;font-family:'DM Mono',monospace;}
+.set-input{width:66px;text-align:center;}
+.set-sep{color:var(--text3);font-size:16px;font-family:'DM Mono',monospace;}
+.options-row{display:flex;gap:1.5rem;margin-bottom:1.25rem;flex-wrap:wrap;align-items:center;}
+.cb-group{display:flex;align-items:center;gap:7px;cursor:pointer;}
+.cb-group input{cursor:pointer;accent-color:var(--accent);width:15px;height:15px;}
+.cb-group span{font-size:13px;color:var(--text2);}
 
--- Speler 3
-insert into players (email, name, rating, matches_played, wins) 
-values ('peter.klok@example.nl', 'Peter Klok', 6.8, 3, 1);
+.kotc-panel-info{background:var(--surface);border:1px solid rgba(245,166,35,.25);border-radius:var(--r);padding:1.25rem;margin-bottom:1.25rem;}
+.pos-btn{padding:4px 12px;border-radius:20px;font-size:12px;border:1px solid var(--border);background:transparent;cursor:pointer;color:var(--text2);transition:all .15s;font-family:'DM Sans',sans-serif;}
+.pos-btn:hover{border-color:var(--border2);color:var(--text);}
+.pos-btn.active{background:var(--warn);border-color:var(--warn);color:#000;font-weight:500;}
 
--- Koppel deze spelers aan club PlayPDL
-insert into club_memberships (player_id, club_id)
-select id, (select id from clubs where slug = 'playpdl')
-from players
-where email in ('jan.jansen@example.nl', 'maria.devries@example.nl', 'peter.klok@example.nl');
+.import-zone{border:2px dashed var(--border2);border-radius:var(--r);padding:2.5rem;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:1.25rem;}
+.import-zone:hover,.import-zone.dragover{border-color:var(--accent);background:rgba(0,212,170,.04);}
+.csv-template{background:var(--surface2);border:1px solid var(--border);border-radius:var(--rs);padding:.875rem;font-family:'DM Mono',monospace;font-size:12px;color:var(--text2);margin-bottom:1.25rem;overflow-x:auto;white-space:nowrap;line-height:1.7;}
 
--- =====================================================
--- 12. (Optioneel) Hulpfunctie om later wachtwoord te hashen
--- =====================================================
--- Als je later wachtwoorden veilig wilt maken, gebruik dan:
--- update clubs set password_hash = crypt('admin123', gen_salt('bf')) where slug = 'playpdl';
+.players-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;}
+.player-card-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:1.1rem;text-align:center;transition:border-color .15s;cursor:pointer;}
+.player-card-box:hover{border-color:var(--border2);}
+.pc-av{width:48px;height:48px;border-radius:50%;margin:0 auto 8px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;}
+.pc-name{font-size:13px;font-weight:500;}
+.pc-rating{font-size:22px;font-weight:600;font-family:'DM Mono',monospace;margin:5px 0;}
+.pc-stats{font-size:11px;color:var(--text3);margin-top:5px;}
+
+.admin-table{width:100%;border-collapse:collapse;}
+.admin-table th{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;padding:.6rem 1rem;text-align:left;border-bottom:1px solid var(--border);background:var(--surface2);}
+.admin-table td{padding:.65rem 1rem;border-bottom:1px solid var(--border);font-size:13px;}
+.admin-table tr:last-child td{border-bottom:none;}
+.admin-table tbody tr:hover{background:var(--surface2);}
+.search-bar{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--rs);padding:9px 12px;color:var(--text);font-size:14px;font-family:'DM Sans',sans-serif;outline:none;margin-bottom:1rem;}
+.search-bar:focus{border-color:var(--accent);}
+
+.history-row{padding:.875rem 1.25rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:1rem;}
+.history-row:last-child{border-bottom:none;}
+.history-teams{flex:1;}
+.ht-main{font-size:13px;font-weight:500;}
+.ht-sub{font-size:12px;color:var(--text2);margin-top:2px;}
+.history-date{font-size:11px;color:var(--text3);font-family:'DM Mono',monospace;min-width:80px;text-align:right;}
+.comp-tag{font-size:10px;padding:2px 7px;border-radius:20px;background:rgba(0,212,170,.1);color:var(--accent);border:1px solid rgba(0,212,170,.2);}
+.kotc-tag{font-size:10px;padding:2px 7px;border-radius:20px;background:rgba(245,166,35,.1);color:var(--warn);border:1px solid rgba(245,166,35,.2);}
+
+@keyframes pop{0%{transform:scale(.8);opacity:0}60%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
+.promo-banner{display:none;background:linear-gradient(135deg,rgba(245,166,35,.12),rgba(0,212,170,.08));border:1px solid var(--gold);border-radius:var(--r);padding:.875rem 1.25rem;margin-bottom:1.25rem;animation:pop .35s ease;}
+.promo-banner.show{display:flex;align-items:center;gap:10px;}
+
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:500;align-items:center;justify-content:center;}
+.modal-overlay.open{display:flex;}
+.modal{background:var(--surface);border:1px solid var(--border2);border-radius:var(--r);padding:1.75rem;width:90%;max-width:460px;}
+.modal-title{font-size:17px;font-weight:600;margin-bottom:1.25rem;}
+.modal-actions{display:flex;gap:8px;margin-top:1.25rem;justify-content:flex-end;}
+
+.loading-overlay{display:none;position:fixed;inset:0;background:rgba(10,14,19,.85);z-index:999;align-items:center;justify-content:center;flex-direction:column;gap:1rem;}
+.loading-overlay.show{display:flex;}
+.spinner{width:36px;height:36px;border:3px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{font-size:14px;color:var(--text2);}
+
+#toast{position:fixed;bottom:1.75rem;right:1.75rem;padding:11px 18px;border-radius:var(--rs);font-size:13px;font-weight:500;z-index:9999;opacity:0;transform:translateY(6px);transition:all .3s;pointer-events:none;max-width:300px;}
+#toast.show{opacity:1;transform:translateY(0);}
+#toast.info{background:var(--surface2);border:1px solid var(--border2);color:var(--text);}
+#toast.success{background:rgba(0,212,170,.15);border:1px solid var(--accent);color:var(--accent);}
+#toast.promo{background:rgba(245,166,35,.15);border:1px solid var(--gold);color:var(--gold);}
+#toast.error{background:rgba(255,91,91,.15);border:1px solid var(--danger);color:var(--danger);}
+
+.lock-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;gap:1rem;}
+.pager{display:flex;align-items:center;justify-content:space-between;padding:.875rem 1.25rem;border-top:1px solid var(--border);font-size:13px;color:var(--text2);}
+.pager-btns{display:flex;gap:6px;}
+
+@media(max-width:768px){
+  .sidebar{width:100%;height:auto;position:fixed;bottom:0;top:auto;flex-direction:row;padding:.4rem;border-right:none;border-top:1px solid var(--border);overflow-x:auto;}
+  .logo,.nav-sep{display:none;}
+  .main{margin-left:0;margin-bottom:76px;padding:1.25rem 1rem;}
+  .stats-row{grid-template-columns:repeat(2,1fr);}
+  .match-grid{grid-template-columns:1fr;}
+  .nav-item{flex-direction:column;gap:1px;padding:6px 10px;font-size:10px;min-width:56px;align-items:center;}
+  .nav-icon{font-size:18px;}
+}
+</style>
+</head>
+<body>
+
+<!-- LOGIN SCHERM -->
+<div id="login-screen" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; gap:1.5rem; background:var(--bg);">
+  <div style="background:var(--surface); padding:2rem; border-radius:var(--r); width:90%; max-width:400px; text-align:center;">
+    <div style="font-size:48px; margin-bottom:1rem;">🏸</div>
+    <h2 style="margin-bottom:1.5rem;">Club Login</h2>
+    <div class="form-group">
+      <label class="form-label">Clubcode (slug)</label>
+      <input type="text" id="club-slug" class="form-control" placeholder="bv. playpdl" value="playpdl">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Wachtwoord</label>
+      <input type="password" id="club-password" class="form-control" placeholder="••••••">
+    </div>
+    <button class="btn btn-accent btn-full" onclick="loginClub()">Inloggen</button>
+    <div id="login-error" style="color:var(--danger); margin-top:1rem; font-size:13px;"></div>
+  </div>
+</div>
+
+<!-- HOOFD APP (verborgen tot login) -->
+<div class="app" id="main-app" style="display:none;">
+
+<aside class="sidebar">
+  <div class="logo">
+    <div class="logo-title">PlayPDL</div>
+    <div class="logo-sub" id="conn-status">Verbinden…</div>
+  </div>
+  <button class="nav-item active" onclick="nav('ranking',this)"><span class="nav-icon">🏆</span>Ranking</button>
+  <button class="nav-item" onclick="nav('wedstrijd',this)"><span class="nav-icon">🎾</span>Wedstrijd</button>
+  <button class="nav-item" onclick="nav('spelers',this)"><span class="nav-icon">👥</span>Spelers</button>
+  <button class="nav-item" onclick="nav('historie',this)"><span class="nav-icon">📋</span>Historie</button>
+  <div class="nav-sep">Beheer</div>
+  <button class="nav-item admin-item" onclick="nav('admin',this)"><span class="nav-icon">⚙️</span>Admin</button>
+</aside>
+
+<main class="main">
+
+<!-- RANKING -->
+<div id="page-ranking" class="page active">
+  <div class="page-header">
+    <div><div class="page-title">Clubranking</div><div class="page-sub" id="rank-ts">–</div></div>
+    <button class="btn btn-outline btn-sm" onclick="loadAll()">↻ Vernieuwen</button>
+  </div>
+  <div class="stats-row">
+    <div class="stat-box"><div class="stat-label">Spelers</div><div class="stat-val" id="s-pl">–</div></div>
+    <div class="stat-box"><div class="stat-label">Wedstrijden</div><div class="stat-val" id="s-ma">–</div></div>
+    <div class="stat-box"><div class="stat-label">Deze week</div><div class="stat-val" id="s-wk">–</div></div>
+    <div class="stat-box"><div class="stat-label">Promoties</div><div class="stat-val" id="s-pr">–</div></div>
+  </div>
+  <div class="filter-bar">
+    <button class="filter-btn active" onclick="setFilter('all',this)">Alle levels</button>
+    <button class="filter-btn" onclick="setFilter('Beginner',this)">Beginner</button>
+    <button class="filter-btn" onclick="setFilter('Bronze',this)">Bronze</button>
+    <button class="filter-btn" onclick="setFilter('Silver',this)">Silver</button>
+    <button class="filter-btn" onclick="setFilter('Gold',this)">Gold</button>
+    <button class="filter-btn" onclick="setFilter('Diamond',this)">Diamond</button>
+  </div>
+  <div class="card">
+    <table class="rank-table">
+      <thead><tr><th>#</th><th>Speler</th><th>Niveau</th><th>Rating</th><th>W</th><th>V</th></tr></thead>
+      <tbody id="rank-body"></tbody>
+    </table>
+    <div class="pager">
+      <span id="pager-info">–</span>
+      <div class="pager-btns">
+        <button class="btn btn-outline btn-sm" onclick="rankPage(-1)">← Vorige</button>
+        <button class="btn btn-outline btn-sm" onclick="rankPage(1)">Volgende →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- WEDSTRIJD -->
+<div id="page-wedstrijd" class="page">
+  <div class="page-header"><div><div class="page-title">Wedstrijd invoeren</div><div class="page-sub">Normaal of King of the Court</div></div></div>
+  <div id="promo-banner" class="promo-banner"><span style="font-size:20px">🎉</span><span id="promo-text" style="font-size:14px;font-weight:500;color:var(--gold)">Promotie!</span></div>
+
+  <div class="filter-bar" style="margin-bottom:1.5rem">
+    <button class="filter-btn active" id="mode-normal" onclick="setMode('normal',this)">🎾 Normale wedstrijd</button>
+    <button class="filter-btn" id="mode-kotc" onclick="setMode('kotc',this)">👑 King of the Court</button>
+  </div>
+
+  <!-- Normale wedstrijd -->
+  <div id="normal-form">
+    <div class="match-grid">
+      <div class="team-card team-a">
+        <div class="team-label">Team A</div>
+        <div class="form-group"><label class="form-label">Speler 1</label><div id="sw-a1" class="player-search-wrap"></div></div>
+        <div class="form-group"><label class="form-label">Speler 2</label><div id="sw-a2" class="player-search-wrap"></div></div>
+      </div>
+      <div class="team-card team-b">
+        <div class="team-label">Team B</div>
+        <div class="form-group"><label class="form-label">Speler 1</label><div id="sw-b1" class="player-search-wrap"></div></div>
+        <div class="form-group"><label class="form-label">Speler 2</label><div id="sw-b2" class="player-search-wrap"></div></div>
+      </div>
+    </div>
+    <div class="sets-card" id="sets-card" style="display:none">
+      <div style="font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:.7px;color:var(--text2);margin-bottom:.875rem">Score per set</div>
+      <div class="set-row"><span class="set-label">Set 1</span><input type="number" class="form-control set-input" id="s1a" min="0" max="7" placeholder="A"><span class="set-sep">–</span><input type="number" class="form-control set-input" id="s1b" min="0" max="7" placeholder="B"></div>
+      <div class="set-row"><span class="set-label">Set 2</span><input type="number" class="form-control set-input" id="s2a" min="0" max="7" placeholder="A"><span class="set-sep">–</span><input type="number" class="form-control set-input" id="s2b" min="0" max="7" placeholder="B"></div>
+      <div class="set-row"><span class="set-label">Set 3 <span style="font-size:10px;color:var(--text3)">(opt)</span></span><input type="number" class="form-control set-input" id="s3a" min="0" max="7" placeholder="A"><span class="set-sep">–</span><input type="number" class="form-control set-input" id="s3b" min="0" max="7" placeholder="B"></div>
+      <div class="options-row" style="margin-top:1rem;margin-bottom:0">
+        <label class="cb-group"><input type="checkbox" id="m-comp" checked><span>Competitief (telt mee voor rating)</span></label>
+      </div>
+    </div>
+    <button class="btn btn-accent btn-full" id="confirm-btn" style="display:none" onclick="submitMatch()">✓ Wedstrijd bevestigen</button>
+  </div>
+
+  <!-- KotC -->
+  <div id="kotc-form" style="display:none">
+    <div class="kotc-panel-info">
+      <div style="font-size:12px;color:var(--text2);line-height:1.8">
+        Vul per duo de 2 spelers in en selecteer de eindpositie.<br>
+        <span style="color:var(--accent)">1e</span> → promotie &nbsp;·&nbsp;
+        <span style="color:var(--danger)">2e</span> → −0.1 speelsterkte &nbsp;·&nbsp;
+        <span style="color:var(--text3)">3e/4e</span> → geen wijziging
+      </div>
+    </div>
+    <div id="kotc-duos-container"></div>
+    <button class="btn btn-outline btn-sm" style="margin-bottom:1.25rem" onclick="addKotcDuo()">+ Duo toevoegen</button>
+    <button class="btn btn-accent btn-full" onclick="submitKotc()">👑 KotC bevestigen</button>
+  </div>
+</div>
+
+<!-- SPELERS -->
+<div id="page-spelers" class="page">
+  <div class="page-header">
+    <div><div class="page-title">Spelers</div><div class="page-sub" id="sp-sub">–</div></div>
+    <button class="btn btn-accent" onclick="openModal('modal-player')">+ Toevoegen</button>
+  </div>
+  <input class="search-bar" id="sp-search" placeholder="Zoek op naam of e-mail…" oninput="renderPlayers()">
+  <div class="players-grid" id="players-grid"></div>
+</div>
+
+<!-- HISTORIE -->
+<div id="page-historie" class="page">
+  <div class="page-header"><div><div class="page-title">Wedstrijdhistorie</div><div class="page-sub" id="hist-sub">–</div></div></div>
+  <div class="card"><div id="history-list"></div></div>
+</div>
+
+<!-- ADMIN -->
+<div id="page-admin" class="page">
+  <div id="admin-panel">
+    <div class="page-header">
+      <div><div class="page-title">⚙️ Admin</div><div class="page-sub">Spelers · Import/Export · Instellingen</div></div>
+      <button class="btn btn-outline btn-sm" onclick="lockAdmin()">🔒 Uitloggen</button>
+    </div>
+    <div class="filter-bar" style="margin-bottom:1.5rem">
+      <button class="filter-btn active" onclick="adminTab('spelers',this)">Spelers</button>
+      <button class="filter-btn" onclick="adminTab('importexport',this)">Import / Export</button>
+      <button class="filter-btn" onclick="adminTab('instellingen',this)">Instellingen</button>
+    </div>
+    <div id="atab-spelers">
+      <input class="search-bar" id="admin-search" placeholder="Zoek speler…" oninput="renderAdminTable()">
+      <div class="card">
+        <table class="admin-table">
+          <thead><tr><th>Naam</th><th>E-mail</th><th>Rating</th><th>Niveau</th><th>Gespeeld</th><th>Gewonnen</th><th></th></tr></thead>
+          <tbody id="admin-body"></tbody>
+        </table>
+        <div class="pager">
+          <span id="admin-pager-info">–</span>
+          <div class="pager-btns">
+            <button class="btn btn-outline btn-sm" onclick="adminPage(-1)">← Vorige</button>
+            <button class="btn btn-outline btn-sm" onclick="adminPage(1)">Volgende →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="atab-importexport" style="display:none">
+      <div class="card card-pad" style="margin-bottom:1.25rem">
+        <div style="font-size:14px;font-weight:500;margin-bottom:.5rem">CSV formaat</div>
+        <div class="csv-template">naam,email,rating,wedstrijden,gewonnen<br>Lars van der Berg,lars@example.nl,9.0,0,0</div>
+      </div>
+      <div class="import-zone" id="drop-zone" onclick="document.getElementById('csv-file').click()">
+        <div style="font-size:36px;margin-bottom:10px">📄</div>
+        <div style="font-size:15px;color:var(--text2)">Klik of sleep een CSV-bestand hier</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:5px">Bestaande spelers (op e-mail) worden bijgewerkt</div>
+        <input type="file" id="csv-file" accept=".csv" style="display:none" onchange="handleCSV(event)">
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-outline" onclick="exportCSV()">↓ Spelers exporteren</button>
+        <button class="btn btn-outline" onclick="exportMatches()">↓ Wedstrijden exporteren</button>
+        <button class="btn btn-danger" onclick="openModal('modal-reset')">⚠ Reset alle data</button>
+      </div>
+    </div>
+    <div id="atab-instellingen" style="display:none">
+      <div class="card card-pad">
+        <div style="font-size:14px;font-weight:500;margin-bottom:.875rem;color:var(--warn)">Wachtwoord wijzigen</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="form-control" type="password" id="new-pw" placeholder="Nieuw wachtwoord" style="max-width:240px">
+          <button class="btn btn-warn btn-sm" onclick="changePassword()">Opslaan</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</main>
+</div>
+
+<!-- Modals -->
+<div class="modal-overlay" id="modal-player">
+  <div class="modal">
+    <div class="modal-title">Speler toevoegen</div>
+    <div class="form-group"><label class="form-label">Naam *</label><input type="text" class="form-control" id="np-name" placeholder="Voornaam Achternaam"></div>
+    <div class="form-group"><label class="form-label">E-mail</label><input type="email" class="form-control" id="np-email"></div>
+    <div class="form-group"><label class="form-label">Startniveau</label>
+      <select class="form-control" id="np-level">
+        <option value="9.0">Beginner – 9.0</option>
+        <option value="8.0">Bronze – 8.0</option>
+        <option value="7.0" selected>Silver – 7.0</option>
+        <option value="6.0">Gold – 6.0</option>
+        <option value="4.0">Diamond – 4.0</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('modal-player')">Annuleren</button>
+      <button class="btn btn-accent" onclick="addPlayer()">Toevoegen</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-edit">
+  <div class="modal">
+    <div class="modal-title">Speler bewerken</div>
+    <input type="hidden" id="edit-id">
+    <div class="form-group"><label class="form-label">Naam</label><input type="text" class="form-control" id="edit-name"></div>
+    <div class="form-group"><label class="form-label">E-mail</label><input type="email" class="form-control" id="edit-email"></div>
+    <div class="form-group"><label class="form-label">Rating</label><input type="number" class="form-control" id="edit-rating" min="1" max="10" step="0.1"></div>
+    <div class="form-group"><label class="form-label">Wedstrijden gespeeld</label><input type="number" class="form-control" id="edit-matches" min="0"></div>
+    <div class="form-group"><label class="form-label">Gewonnen</label><input type="number" class="form-control" id="edit-wins" min="0"></div>
+    <div class="modal-actions">
+      <button class="btn btn-danger btn-sm" onclick="deletePlayer()">Verwijderen</button>
+      <button class="btn btn-outline" onclick="closeModal('modal-edit')">Annuleren</button>
+      <button class="btn btn-accent" onclick="saveEdit()">Opslaan</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-history">
+  <div class="modal" style="max-width:580px;max-height:80vh;overflow-y:auto">
+    <div class="modal-title" id="history-modal-title">Wedstrijdhistorie</div>
+    <div id="history-modal-list"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('modal-history')">Sluiten</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-reset">
+  <div class="modal">
+    <div class="modal-title">Alle data verwijderen?</div>
+    <p style="color:var(--text2);font-size:14px;line-height:1.6">Dit verwijdert alle spelers en wedstrijden van deze club uit de database. Niet terug te draaien.</p>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('modal-reset')">Annuleren</button>
+      <button class="btn btn-danger" onclick="resetAll()">Verwijder alles</button>
+    </div>
+  </div>
+</div>
+
+<div class="loading-overlay" id="loading"><div class="spinner"></div><div class="loading-text" id="loading-text">Laden…</div></div>
+<div id="toast"></div>
+
+<script>
+// =====================================================
+// JOUW SUPABASE GEGEVENS (ingevuld)
+// =====================================================
+const SUPA_URL = 'https://jzocskzqugaggxnmqqcw.supabase.co';
+const SUPA_KEY = 'sb_publishable_lkHvpW60Wgwx8zW9f9cu3Q_7z3u-5TG';
+const sb = supabase.createClient(SUPA_URL, SUPA_KEY);
+
+// =====================================================
+// STATE
+// =====================================================
+let players = [];
+let matches = [];
+let currentClubId = null;
+let currentClubSlug = null;
+let promos = 0;
+let rankFilter = 'all', rankCur = 0, adminCur = 0;
+const PAGE = 50;
+const KOTC_PROMO = {Beginner:8.4, Bronze:7.4, Silver:6.4, Gold:4.9, Diamond:3.4};
+let sel = {a1:null,a2:null,b1:null,b2:null};
+let currentMode = 'normal';
+let kotcDuos = [], kotcDuoCount = 0;
+
+// =====================================================
+// HELPERS
+// =====================================================
+function level(r){if(r>=8.5)return'Beginner';if(r>=7.5)return'Bronze';if(r>=6.5)return'Silver';if(r>=5.0)return'Gold';return'Diamond';}
+function lvOrder(l){return{Diamond:0,Gold:1,Silver:2,Bronze:3,Beginner:4}[l]??5;}
+function initials(n){return n.split(' ').filter(Boolean).map(x=>x[0]).slice(0,2).join('').toUpperCase();}
+function lvCls(l){return'badge lv-'+l.toLowerCase();}
+function avStyle(l){return{Beginner:'background:#1a2330;color:#7a8fa6',Bronze:'background:#2a1e0f;color:#cd8b4a',Silver:'background:#1e2530;color:#a8b8c8',Gold:'background:#2a2008;color:#f5a623',Diamond:'background:#0f1e2a;color:#7dd3fc'}[l]||'background:#1a2330;color:#7a8fa6';}
+
+const K_KNLTB = 0.275;
+const Q_DUBBEL = 2.012;
+const THETA = 0.5;
+function combinedRating(r1, r2){ return THETA*r1 + (1-THETA)*r2; }
+function winProb(r12own, r12opp){ return 1 / (1 + Math.exp(-Q_DUBBEL * (r12own - r12opp))); }
+function newRating(rOld, prob, result){ return Math.max(1.0, Math.min(9.0, rOld + K_KNLTB * (prob - result))); }
+function knltbDoubles(rA1, rA2, rB1, rB2, teamAWon){
+  const r12A = combinedRating(rA1, rA2);
+  const r12B = combinedRating(rB1, rB2);
+  const probA = winProb(r12A, r12B);
+  const probB = 1 - probA;
+  const resultA = teamAWon ? 1 : 0;
+  const resultB = teamAWon ? 0 : 1;
+  return {
+    newA1: newRating(rA1, probA, resultA),
+    newA2: newRating(rA2, probA, resultA),
+    newB1: newRating(rB1, probB, resultB),
+    newB2: newRating(rB2, probB, resultB),
+  };
+}
+
+function fmtDate(iso){return new Date(iso).toLocaleDateString('nl-NL',{day:'2-digit',month:'2-digit',year:'2-digit'});}
+function toast(msg,type='info'){const t=document.getElementById('toast');t.textContent=msg;t.className='show '+type;clearTimeout(t._t);t._t=setTimeout(()=>t.className='',3500);}
+function openModal(id){document.getElementById(id).classList.add('open');}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+function showLoading(txt='Laden…'){document.getElementById('loading-text').textContent=txt;document.getElementById('loading').classList.add('show');}
+function hideLoading(){document.getElementById('loading').classList.remove('show');}
+function nextLevel(lv){return{Beginner:'Bronze',Bronze:'Silver',Silver:'Gold',Gold:'Diamond',Diamond:'Diamond (max)'}[lv]||lv;}
+function sv(id){const v=document.getElementById(id).value;return v===''?null:parseInt(v);}
+function escapeHtml(str){if(!str)return '';return str.replace(/[&<>]/g,function(m){if(m==='&')return'&amp;';if(m==='<')return'&lt;';if(m==='>')return'&gt;';return m;});}
+
+// =====================================================
+// LOGIN FUNCTIE
+// =====================================================
+async function loginClub() {
+  const slug = document.getElementById('club-slug').value.trim();
+  const password = document.getElementById('club-password').value;
+  const errorDiv = document.getElementById('login-error');
+  
+  if (!slug || !password) {
+    errorDiv.textContent = 'Vul clubcode en wachtwoord in.';
+    return;
+  }
+  
+  showLoading('Inloggen...');
+  
+  try {
+    const { data: club, error } = await sb
+      .from('clubs')
+      .select('id, name, password_hash')
+      .eq('slug', slug)
+      .single();
+    
+    if (error || !club) {
+      errorDiv.textContent = 'Club niet gevonden.';
+      hideLoading();
+      return;
+    }
+    
+    if (password !== club.password_hash) {
+      errorDiv.textContent = 'Verkeerd wachtwoord.';
+      hideLoading();
+      return;
+    }
+    
+    currentClubId = club.id;
+    currentClubSlug = slug;
+    localStorage.setItem('club_id', club.id);
+    localStorage.setItem('club_slug', slug);
+    
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('main-app').style.display = 'flex';
+    
+    await loadAll();
+    hideLoading();
+    
+  } catch (e) {
+    errorDiv.textContent = 'Fout: ' + e.message;
+    hideLoading();
+  }
+}
+
+function lockAdmin() {
+  localStorage.removeItem('club_id');
+  localStorage.removeItem('club_slug');
+  currentClubId = null;
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('main-app').style.display = 'none';
+}
+
+async function changePassword() {
+  const newPw = document.getElementById('new-pw').value.trim();
+  if (!newPw) { toast('Voer een nieuw wachtwoord in.', 'error'); return; }
+  
+  showLoading('Wachtwoord wijzigen...');
+  try {
+    const { error } = await sb
+      .from('clubs')
+      .update({ password_hash: newPw })
+      .eq('id', currentClubId);
+    if (error) throw error;
+    toast('Wachtwoord gewijzigd!', 'success');
+    document.getElementById('new-pw').value = '';
+  } catch (e) { toast('Fout: ' + e.message, 'error'); }
+  hideLoading();
+}
+
+// =====================================================
+// DATA LADEN
+// =====================================================
+async function loadAll() {
+  if (!currentClubId) return;
+  showLoading('Data laden…');
+  
+  try {
+    const { data: members, error: membersError } = await sb
+      .from('club_memberships')
+      .select('player_id')
+      .eq('club_id', currentClubId);
+    
+    if (membersError) throw membersError;
+    const playerIds = members.map(m => m.player_id);
+    
+    if (playerIds.length > 0) {
+      const { data: playersData, error: playersError } = await sb
+        .from('players')
+        .select('*')
+        .in('id', playerIds);
+      if (playersError) throw playersError;
+      players = playersData || [];
+    } else {
+      players = [];
+    }
+    
+    const { data: matchesData, error: matchesError } = await sb
+      .from('matches')
+      .select('*')
+      .eq('club_id', currentClubId)
+      .order('played_at', { ascending: false });
+    if (matchesError) throw matchesError;
+    matches = matchesData || [];
+    
+    const { data: settings, error: settingsError } = await sb
+      .from('club_settings')
+      .select('value')
+      .eq('club_id', currentClubId)
+      .eq('key', 'promos')
+      .single();
+    if (!settingsError && settings) {
+      promos = parseInt(settings.value) || 0;
+    } else {
+      promos = 0;
+    }
+    
+    console.log(`✅ Geladen: ${players.length} spelers, ${matches.length} wedstrijden`);
+    
+    renderRanking();
+    renderPlayers();
+    renderHistory();
+    
+  } catch (e) {
+    toast('Fout bij laden: ' + e.message, 'error');
+    console.error(e);
+  }
+  hideLoading();
+}
+
+// =====================================================
+// RANKING
+// =====================================================
+function renderRanking() {
+  let list = [...players].sort((a,b) => a.rating - b.rating);
+  if (rankFilter !== 'all') list = list.filter(p => level(p.rating) === rankFilter);
+  
+  document.getElementById('s-pl').textContent = players.length;
+  document.getElementById('s-ma').textContent = matches.length;
+  const now = Date.now();
+  document.getElementById('s-wk').textContent = matches.filter(m => now - new Date(m.played_at) < 7*86400000).length;
+  document.getElementById('s-pr').textContent = promos;
+  document.getElementById('rank-ts').textContent = 'Bijgewerkt: ' + new Date().toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit'});
+  
+  const total = list.length, pages = Math.max(1, Math.ceil(total / PAGE));
+  rankCur = Math.min(rankCur, pages - 1);
+  const slice = list.slice(rankCur * PAGE, (rankCur + 1) * PAGE);
+  document.getElementById('pager-info').textContent = `${rankCur*PAGE+1}–${Math.min((rankCur+1)*PAGE, total)} van ${total}`;
+  
+  const tbody = document.getElementById('rank-body');
+  if (!slice.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--text3)">Geen spelers in dit niveau.</td></tr>';
+    return;
+  }
+  
+  tbody.innerHTML = slice.map((p,i) => {
+    const pos = rankCur*PAGE + i + 1, lv = level(p.rating), pc = pos===1?'p1':pos===2?'p2':pos===3?'p3':'';
+    return `<tr>
+      <td class="rank-pos ${pc}">${pos}</td>
+      <td><div class="player-cell"><div class="avatar" style="${avStyle(lv)}">${initials(p.name)}</div>
+        <div><div class="pname">${escapeHtml(p.name)}</div><div class="pemail">${escapeHtml(p.email || '–')}</div></div></div></td>
+      <td><span class="${lvCls(lv)}">${lv}</span></td>
+      <td><span class="rating-val">${p.rating.toFixed(2)}</span></td>
+      <td style="color:var(--text2);font-size:13px">${p.matches_played}</td>
+      <td style="color:var(--text2);font-size:13px">${p.wins}</td>
+    </tr>`;
+  }).join('');
+}
+
+function rankPage(d){ rankCur = Math.max(0, rankCur + d); renderRanking(); }
+function setFilter(f,btn){ rankFilter = f; rankCur = 0; document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); renderRanking(); }
+
+// =====================================================
+// PLAYER SEARCH
+// =====================================================
+function buildSearchWidget(wrapId, slot) {
+  const wrap = document.getElementById(wrapId);
+  if (!wrap) return;
+  wrap.innerHTML = `<input class="player-search-input" id="psi-${slot}" placeholder="Typ naam…" autocomplete="off"
+    oninput="filterDropdown('${slot}')" onfocus="filterDropdown('${slot}')" onblur="setTimeout(()=>closeDropdown('${slot}'),200)">
+    <div class="player-dropdown" id="pdd-${slot}"></div>`;
+}
+
+function filterDropdown(slot) {
+  const q = document.getElementById('psi-' + slot).value.toLowerCase();
+  const dd = document.getElementById('pdd-' + slot);
+  const used = Object.values(sel).filter(Boolean);
+  let res = players.filter(p => !used.includes(p.id) && (p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q))).slice(0, 8);
+  if (!res.length) {
+    dd.innerHTML = '<div class="pd-empty">' + (q ? 'Geen resultaten' : 'Typ om te zoeken') + '</div>';
+    dd.classList.add('open');
+    return;
+  }
+  dd.innerHTML = res.map(p => `<div class="pd-item" onmousedown="selectPlayer('${slot}', '${p.id}')">
+    <div class="pd-name">${escapeHtml(p.name)}</div><span class="${lvCls(level(p.rating))}">${p.rating.toFixed(2)}</span></div>`).join('');
+  dd.classList.add('open');
+}
+
+function closeDropdown(slot) { const d = document.getElementById('pdd-' + slot); if(d) d.classList.remove('open'); }
+
+function selectPlayer(slot, id) {
+  sel[slot] = id;
+  const p = players.find(x => x.id === id);
+  const inp = document.getElementById('psi-' + slot);
+  inp.value = p.name + ' (' + p.rating.toFixed(2) + ')';
+  inp.style.borderColor = 'var(--accent)';
+  closeDropdown(slot);
+  const allSet = sel.a1 && sel.a2 && sel.b1 && sel.b2;
+  document.getElementById('sets-card').style.display = allSet ? 'block' : 'none';
+  document.getElementById('confirm-btn').style.display = allSet ? 'block' : 'none';
+}
+
+// =====================================================
+// WEDSTRIJD SUBMIT
+// =====================================================
+async function submitMatch() {
+  if (!sel.a1 || !sel.a2 || !sel.b1 || !sel.b2) {
+    toast('Kies 4 spelers.', 'error');
+    return;
+  }
+  
+  const ids = [sel.a1, sel.a2, sel.b1, sel.b2];
+  if (new Set(ids).size < 4) {
+    toast('Kies 4 verschillende spelers.', 'error');
+    return;
+  }
+  
+  const sets = [[sv('s1a'), sv('s1b')], [sv('s2a'), sv('s2b')], [sv('s3a'), sv('s3b')]];
+  const played = sets.filter(([a,b]) => a !== null && b !== null);
+  if (played.length < 2) {
+    toast('Voer minimaal 2 sets in.', 'error');
+    return;
+  }
+  
+  const comp = document.getElementById('m-comp').checked;
+  const wA = played.filter(([a,b]) => a > b).length;
+  const wB = played.filter(([a,b]) => b > a).length;
+  const aWon = wA > wB;
+  
+  showLoading('Opslaan...');
+  
+  try {
+    const { data: freshPlayers, error: fetchError } = await sb
+      .from('players')
+      .select('*')
+      .in('id', ids);
+    if (fetchError) throw fetchError;
+    if (!freshPlayers || freshPlayers.length !== 4) throw new Error('Spelers niet gevonden');
+    
+    const pA = freshPlayers.filter(p => ids.slice(0,2).includes(p.id));
+    const pB = freshPlayers.filter(p => ids.slice(2,4).includes(p.id));
+    let promoNames = [];
+    let newPromos = promos;
+    
+    if (comp) {
+      const { newA1, newA2, newB1, newB2 } = knltbDoubles(pA[0].rating, pA[1].rating, pB[0].rating, pB[1].rating, aWon);
+      
+      [[pA[0], newA1], [pA[1], newA2], [pB[0], newB1], [pB[1], newB2]].forEach(([p, nr]) => {
+        const oldLv = level(p.rating);
+        p.rating = nr;
+        p.matches_played++;
+        if ((p === pA[0] || p === pA[1]) ? aWon : !aWon) p.wins++;
+        if (lvOrder(level(p.rating)) < lvOrder(oldLv)) {
+          promoNames.push(p.name);
+          newPromos++;
+        }
+      });
+    } else {
+      [...pA, ...pB].forEach((p, i) => {
+        p.matches_played++;
+        if ((i < 2 && aWon) || (i >= 2 && !aWon)) p.wins++;
+      });
+    }
+    
+    for (const player of [...pA, ...pB]) {
+      const { error } = await sb
+        .from('players')
+        .update({
+          rating: player.rating,
+          matches_played: player.matches_played,
+          wins: player.wins
+        })
+        .eq('id', player.id);
+      if (error) throw error;
+    }
+    
+    const { error: matchError } = await sb
+      .from('matches')
+      .insert({
+        club_id: currentClubId,
+        team_a: ids.slice(0,2),
+        team_b: ids.slice(2,4),
+        score_a: played.map(s => s[0]),
+        score_b: played.map(s => s[1]),
+        competitive: comp,
+        kotc: false,
+        played_at: new Date().toISOString()
+      });
+    if (matchError) throw matchError;
+    
+    if (comp && promoNames.length) {
+      await sb
+        .from('club_settings')
+        .upsert({ club_id: currentClubId, key: 'promos', value: String(newPromos) });
+      promos = newPromos;
+    }
+    
+    await loadAll();
+    
+    if (promoNames.length) {
+      document.getElementById('promo-text').textContent = 'Promotie! ' + promoNames.join(' & ') + ' gaat omhoog!';
+      document.getElementById('promo-banner').classList.add('show');
+      toast('Promotie! Ratings bijgewerkt.', 'promo');
+    } else {
+      toast('Wedstrijd opgeslagen!', 'success');
+    }
+    
+    initWedstrijd();
+    
+  } catch (e) {
+    toast('Fout: ' + e.message, 'error');
+    console.error(e);
+  }
+  hideLoading();
+}
+
+// =====================================================
+// KOTC SUBMIT
+// =====================================================
+async function submitKotc() {
+  if (kotcDuos.length < 2) { toast('Voeg minimaal 2 duo\'s toe.', 'error'); return; }
+  for (const d of kotcDuos) {
+    if (!d.p1 || !d.p2) { toast('Selecteer alle spelers.', 'error'); return; }
+    if (!d.pos) { toast('Geef elk duo een eindpositie.', 'error'); return; }
+  }
+  if (new Set(kotcDuos.map(d => d.pos)).size < kotcDuos.length) { toast('Elke positie maar één keer.', 'error'); return; }
+  
+  const allIds = kotcDuos.flatMap(d => [d.p1, d.p2]);
+  if (new Set(allIds).size < allIds.length) { toast('Een speler mag niet twee keer meedoen.', 'error'); return; }
+  
+  const allLevels = allIds.map(id => level(players.find(p => p.id === id).rating));
+  if (!allLevels.every(l => l === allLevels[0])) { toast('Alle spelers moeten hetzelfde niveau hebben.', 'error'); return; }
+  
+  const kotcLv = allLevels[0], promoR = KOTC_PROMO[kotcLv];
+  let promoNames = [], changedPlayers = [];
+  
+  const { data: freshPlayers, error: fetchError } = await sb
+    .from('players')
+    .select('*')
+    .in('id', allIds);
+  if (fetchError) throw fetchError;
+  
+  const playerMap = new Map();
+  freshPlayers.forEach(p => playerMap.set(p.id, p));
+  
+  kotcDuos.forEach(d => {
+    const p1 = playerMap.get(d.p1);
+    const p2 = playerMap.get(d.p2);
+    const oldLv1 = level(p1.rating);
+    const oldLv2 = level(p2.rating);
+    
+    if (d.pos === 1) {
+      p1.rating = promoR;
+      p2.rating = promoR;
+      p1.wins++;
+      p2.wins++;
+      promoNames.push(p1.name, p2.name);
+    } else if (d.pos === 2) {
+      const avgOpp = kotcDuos.filter(x => x.idx !== d.idx)
+        .flatMap(x => [playerMap.get(x.p1), playerMap.get(x.p2)]).filter(Boolean)
+        .reduce((s, op, _, a) => s + op.rating / a.length, 0);
+      const r12own = combinedRating(p1.rating, p2.rating);
+      const probLose = winProb(r12own, avgOpp);
+      p1.rating = Math.max(1.0, Math.min(9.0, Math.min(p1.rating - 0.1, newRating(p1.rating, probLose, 0))));
+      p2.rating = Math.max(1.0, Math.min(9.0, Math.min(p2.rating - 0.1, newRating(p2.rating, probLose, 0))));
+    }
+    p1.matches_played++;
+    p2.matches_played++;
+    changedPlayers.push(p1, p2);
+  });
+  
+  showLoading('KotC opslaan…');
+  try {
+    for (const player of changedPlayers) {
+      await sb.from('players').update({
+        rating: player.rating,
+        matches_played: player.matches_played,
+        wins: player.wins
+      }).eq('id', player.id);
+    }
+    
+    await sb.from('matches').insert({
+      club_id: currentClubId,
+      team_a: kotcDuos.slice(0,2).flatMap(d => [d.p1, d.p2]),
+      team_b: kotcDuos.slice(2).flatMap(d => [d.p1, d.p2]),
+      score_a: [], score_b: [],
+      competitive: true,
+      kotc: true,
+      kotc_level: kotcLv,
+      kotc_duos: JSON.stringify(kotcDuos.map(d => ({ ids: [d.p1, d.p2], pos: d.pos }))),
+      played_at: new Date().toISOString()
+    });
+    
+    if (promoNames.length) {
+      let newPromos = promos + promoNames.length;
+      await sb.from('club_settings').upsert({ club_id: currentClubId, key: 'promos', value: String(newPromos) });
+      promos = newPromos;
+    }
+    
+    await loadAll();
+    document.getElementById('promo-text').textContent = '👑 KotC! ' + promoNames.join(' & ') + ' promoveren naar ' + nextLevel(kotcLv) + '!';
+    document.getElementById('promo-banner').classList.add('show');
+    toast('King of the Court opgeslagen!', 'promo');
+    initWedstrijd();
+  } catch(e) { toast('Fout: ' + e.message, 'error'); }
+  hideLoading();
+}
+
+// =====================================================
+// WEDSTRIJD INIT
+// =====================================================
+function initWedstrijd() {
+  sel = {a1:null, a2:null, b1:null, b2:null};
+  ['a1','a2','b1','b2'].forEach(s => buildSearchWidget('sw-'+s, s));
+  document.getElementById('sets-card').style.display = 'none';
+  document.getElementById('confirm-btn').style.display = 'none';
+  document.getElementById('m-comp').checked = true;
+  document.getElementById('promo-banner').classList.remove('show');
+  ['s1a','s1b','s2a','s2b','s3a','s3b'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+  currentMode = 'normal';
+  document.getElementById('normal-form').style.display = 'block';
+  document.getElementById('kotc-form').style.display = 'none';
+  document.getElementById('mode-normal').classList.add('active');
+  document.getElementById('mode-kotc').classList.remove('active');
+}
+
+function setMode(mode, btn) {
+  currentMode = mode;
+  document.querySelectorAll('#page-wedstrijd .filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('normal-form').style.display = mode === 'normal' ? 'block' : 'none';
+  document.getElementById('kotc-form').style.display = mode === 'kotc' ? 'block' : 'none';
+  document.getElementById('promo-banner').classList.remove('show');
+  if (mode === 'kotc') initKotcForm();
+}
+
+// =====================================================
+// KOTC FUNCTIES
+// =====================================================
+function initKotcForm() { kotcDuos = []; kotcDuoCount = 0; document.getElementById('kotc-duos-container').innerHTML = ''; addKotcDuo(); addKotcDuo(); }
+function addKotcDuo() {
+  const idx = kotcDuoCount++;
+  kotcDuos.push({ idx, p1: null, p2: null, pos: null });
+  const container = document.getElementById('kotc-duos-container');
+  const div = document.createElement('div');
+  div.id = 'kotc-duo-' + idx;
+  div.style.cssText = 'background:var(--surface);border:1px solid rgba(245,166,35,.2);border-radius:var(--r);padding:1.25rem;margin-bottom:.875rem;';
+  div.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.875rem">
+    <span style="font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:.7px;color:var(--warn)">Duo ${idx+1}</span>
+    ${idx >= 2 ? `<button class="btn btn-danger btn-sm" onclick="removeKotcDuo(${idx})">✕</button>` : ''}
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:.875rem">
+    <div><div class="form-label">Speler 1</div><div id="ksw-${idx}-1" class="player-search-wrap"></div></div>
+    <div><div class="form-label">Speler 2</div><div id="ksw-${idx}-2" class="player-search-wrap"></div></div>
+  </div>
+  <div><div class="form-label">Eindpositie</div>
+    <div style="display:flex;gap:8px" id="kpos-${idx}">
+      ${[1,2,3,4].map(n => `<button class="pos-btn" onclick="setKotcPos(${idx},${n})">${n}e</button>`).join('')}
+    </div>
+  </div>`;
+  container.appendChild(div);
+  buildKotcSearch(idx, 1);
+  buildKotcSearch(idx, 2);
+}
+function removeKotcDuo(idx) { kotcDuos = kotcDuos.filter(d => d.idx !== idx); document.getElementById('kotc-duo-' + idx)?.remove(); }
+function buildKotcSearch(duoIdx, slot) {
+  const wrap = document.getElementById('ksw-' + duoIdx + '-' + slot);
+  if (!wrap) return;
+  const key = 'k-' + duoIdx + '-' + slot;
+  wrap.innerHTML = `<input class="player-search-input" id="psi-${key}" placeholder="Typ naam…" autocomplete="off"
+    oninput="filterKotcDropdown('${key}',${duoIdx},${slot})" onfocus="filterKotcDropdown('${key}',${duoIdx},${slot})" onblur="setTimeout(()=>closeDropdown('${key}'),200)">
+    <div class="player-dropdown" id="pdd-${key}"></div>`;
+}
+function filterKotcDropdown(key, duoIdx, slot) {
+  const q = document.getElementById('psi-' + key).value.toLowerCase();
+  const dd = document.getElementById('pdd-' + key);
+  const used = kotcDuos.flatMap(d => [d.p1, d.p2]).filter(Boolean);
+  let res = players.filter(p => !used.includes(p.id) && (p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q))).slice(0, 8);
+  if (!res.length) { dd.innerHTML = '<div class="pd-empty">Geen resultaten</div>'; dd.classList.add('open'); return; }
+  dd.innerHTML = res.map(p => `<div class="pd-item" onmousedown="selectKotcPlayer('${key}',${duoIdx},${slot},'${p.id}')">
+    <div class="pd-name">${escapeHtml(p.name)}</div><span class="${lvCls(level(p.rating))}">${p.rating.toFixed(2)}</span></div>`).join('');
+  dd.classList.add('open');
+}
+function selectKotcPlayer(key, duoIdx, slot, id) {
+  const duo = kotcDuos.find(d => d.idx === duoIdx);
+  if (!duo) return;
+  if (slot === 1) duo.p1 = id; else duo.p2 = id;
+  const p = players.find(x => x.id === id);
+  const inp = document.getElementById('psi-' + key);
+  inp.value = p.name + ' (' + p.rating.toFixed(2) + ')';
+  inp.style.borderColor = 'var(--accent)';
+  closeDropdown(key);
+}
+function setKotcPos(duoIdx, pos) {
+  kotcDuos.forEach(d => { if (d.pos === pos && d.idx !== duoIdx) d.pos = null; });
+  const duo = kotcDuos.find(d => d.idx === duoIdx);
+  if (!duo) return;
+  duo.pos = pos;
+  kotcDuos.forEach(d => {
+    const row = document.getElementById('kpos-' + d.idx);
+    if (!row) return;
+    row.querySelectorAll('.pos-btn').forEach((btn, i) => btn.classList.toggle('active', d.pos === i+1));
+  });
+}
+
+// =====================================================
+// SPELERS
+// =====================================================
+function renderPlayers() {
+  const q = (document.getElementById('sp-search')?.value || '').toLowerCase();
+  let list = players.filter(p => !q || p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q)).sort((a,b) => a.rating - b.rating);
+  document.getElementById('sp-sub').textContent = players.length + ' spelers';
+  document.getElementById('players-grid').innerHTML = list.map(p => {
+    const lv = level(p.rating);
+    return `<div class="player-card-box" onclick="editPlayer('${p.id}')">
+      <div class="pc-av" style="${avStyle(lv)}">${initials(p.name)}</div>
+      <div class="pc-name">${escapeHtml(p.name)}</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:4px">${escapeHtml(p.email || '–')}</div>
+      <div class="pc-rating">${p.rating.toFixed(2)}</div>
+      <span class="${lvCls(lv)}">${lv}</span>
+      <div class="pc-stats">${p.wins}W · ${p.matches_played - p.wins}V · ${p.matches_played} gespeeld</div>
+    </div>`;
+  }).join('');
+}
+
+async function addPlayer() {
+  const name = document.getElementById('np-name').value.trim();
+  const email = document.getElementById('np-email').value.trim();
+  const rating = parseFloat(document.getElementById('np-level').value);
+  if (!name) { toast('Voer een naam in.', 'error'); return; }
+  
+  showLoading('Toevoegen…');
+  try {
+    let playerId = null;
+    if (email) {
+      const { data: existing } = await sb.from('players').select('id').eq('email', email).single();
+      if (existing) playerId = existing.id;
+    }
+    
+    if (!playerId) {
+      const { data: newPlayer, error } = await sb
+        .from('players')
+        .insert({ name, email, rating, matches_played: 0, wins: 0 })
+        .select()
+        .single();
+      if (error) throw error;
+      playerId = newPlayer.id;
+    }
+    
+    const { error: memberError } = await sb
+      .from('club_memberships')
+      .upsert({ player_id: playerId, club_id: currentClubId }, { onConflict: 'player_id, club_id' });
+    if (memberError) throw memberError;
+    
+    await loadAll();
+    closeModal('modal-player');
+    document.getElementById('np-name').value = '';
+    document.getElementById('np-email').value = '';
+    toast(name + ' toegevoegd aan club!', 'success');
+  } catch(e) { toast('Fout: ' + e.message, 'error'); }
+  hideLoading();
+}
+
+// =====================================================
+// ADMIN
+// =====================================================
+function adminTab(tab, btn) {
+  ['spelers', 'importexport', 'instellingen'].forEach(t => {
+    const el = document.getElementById('atab-' + t);
+    if (el) el.style.display = 'none';
+  });
+  document.getElementById('atab-' + tab).style.display = 'block';
+  document.querySelectorAll('#page-admin .filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (tab === 'spelers') renderAdminTable();
+}
+
+function renderAdminTable() {
+  const q = (document.getElementById('admin-search')?.value || '').toLowerCase();
+  let list = players.filter(p => !q || p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q)).sort((a,b) => a.name.localeCompare(b.name));
+  const total = list.length, pages = Math.max(1, Math.ceil(total / PAGE));
+  adminCur = Math.min(adminCur, pages - 1);
+  const slice = list.slice(adminCur * PAGE, (adminCur + 1) * PAGE);
+  document.getElementById('admin-pager-info').textContent = `${adminCur*PAGE+1}–${Math.min((adminCur+1)*PAGE, total)} van ${total}`;
+  document.getElementById('admin-body').innerHTML = slice.map(p => {
+    const lv = level(p.rating);
+    return `<tr>
+      <td style="font-weight:500">${escapeHtml(p.name)}</td>
+      <td style="color:var(--text2)">${escapeHtml(p.email || '–')}</td>
+      <td><span class="rating-val">${p.rating.toFixed(2)}</span></td>
+      <td><span class="${lvCls(lv)}">${lv}</span></td>
+      <td style="color:var(--text2)">${p.matches_played}</td>
+      <td style="color:var(--text2)">${p.wins}</td>
+      <td><button class="btn btn-outline btn-sm" onclick="editPlayer('${p.id}')" style="margin-right:4px">✏️</button>
+          <button class="btn btn-outline btn-sm" onclick="showPlayerHistory('${p.id}')" title="Wedstrijdhistorie">📋</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function adminPage(d) { adminCur = Math.max(0, adminCur + d); renderAdminTable(); }
+
+function showPlayerHistory(id) {
+  const p = players.find(x => x.id === id);
+  if (!p) return;
+  const n = pid => (players.find(x => x.id === pid) || {}).name || ('Speler ' + pid);
+  const playerMatches = matches.filter(m => (m.team_a || []).includes(id) || (m.team_b || []).includes(id));
+  document.getElementById('history-modal-title').textContent = `${p.name} — ${playerMatches.length} wedstrijden`;
+  if (!playerMatches.length) {
+    document.getElementById('history-modal-list').innerHTML = '<p style="color:var(--text2);font-size:13px;padding:1rem 0">Nog geen wedstrijden gespeeld.</p>';
+    openModal('modal-history');
+    return;
+  }
+  document.getElementById('history-modal-list').innerHTML = playerMatches.map(m => {
+    const inA = (m.team_a || []).includes(id);
+    const teammates = (inA ? m.team_a : m.team_b).filter(x => x !== id).map(n).join(', ');
+    const opponents = (inA ? m.team_b : m.team_a).map(n).join(' & ');
+    const sA = m.score_a || [], sB = m.score_b || [];
+    const wA = sA.filter((a,i) => a > sB[i]).length, wB = sB.filter((b,i) => b > sA[i]).length;
+    const won = m.kotc ? null : (inA ? wA > wB : wB > wA);
+    const sets = sA.map((a,i) => a + '-' + sB[i]).join(', ') || '–';
+    const resultColor = won === null ? 'var(--warn)' : won ? 'var(--accent)' : 'var(--danger)';
+    const resultLabel = m.kotc ? 'KotC' : won ? 'Gewonnen' : 'Verloren';
+    return `<div style="padding:.875rem 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">
+      <div style="min-width:72px;font-size:12px;font-weight:500;color:${resultColor}">${resultLabel}</div>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:500">vs ${opponents}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">
+          Partner: ${teammates || '–'} · ${m.kotc ? 'King of the Court' : sets} · ${fmtDate(m.played_at)}
+        </div>
+      </div>
+      ${m.competitive ? '<span class="comp-tag">Comp</span>' : ''}
+    </div>`;
+  }).join('');
+  openModal('modal-history');
+}
+
+function editPlayer(id) {
+  const p = players.find(x => x.id === id);
+  if (!p) return;
+  document.getElementById('edit-id').value = id;
+  document.getElementById('edit-name').value = p.name;
+  document.getElementById('edit-email').value = p.email || '';
+  document.getElementById('edit-rating').value = p.rating.toFixed(2);
+  document.getElementById('edit-matches').value = p.matches_played;
+  document.getElementById('edit-wins').value = p.wins;
+  openModal('modal-edit');
+}
+
+async function saveEdit() {
+  const id = document.getElementById('edit-id').value;
+  const p = players.find(x => x.id === id);
+  if (!p) return;
+  const name = document.getElementById('edit-name').value.trim();
+  const rating = parseFloat(document.getElementById('edit-rating').value);
+  if (!name) { toast('Naam verplicht.', 'error'); return; }
+  if (isNaN(rating) || rating < 1 || rating > 10) { toast('Rating tussen 1.0 en 10.0.', 'error'); return; }
+  
+  showLoading('Opslaan…');
+  try {
+    await sb.from('players').update({
+      name: name,
+      email: document.getElementById('edit-email').value.trim(),
+      rating: rating,
+      matches_played: parseInt(document.getElementById('edit-matches').value) || 0,
+      wins: parseInt(document.getElementById('edit-wins').value) || 0
+    }).eq('id', id);
+    await loadAll();
+    renderAdminTable();
+    closeModal('modal-edit');
+    toast(name + ' opgeslagen.', 'success');
+  } catch(e) { toast('Fout: ' + e.message, 'error'); }
+  hideLoading();
+}
+
+async function deletePlayer() {
+  const id = document.getElementById('edit-id').value;
+  const p = players.find(x => x.id === id);
+  if (!p) return;
+  if (!confirm(p.name + ' verwijderen uit deze club?')) return;
+  
+  showLoading('Verwijderen…');
+  try {
+    await sb.from('club_memberships').delete().eq('player_id', id).eq('club_id', currentClubId);
+    await loadAll();
+    renderAdminTable();
+    renderPlayers();
+    closeModal('modal-edit');
+    toast(p.name + ' verwijderd uit club.', 'info');
+  } catch(e) { toast('Fout: ' + e.message, 'error'); }
+  hideLoading();
+}
+
+// =====================================================
+// IMPORT / EXPORT
+// =====================================================
+function handleCSV(e) { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => parseCSV(ev.target.result); r.readAsText(f, 'utf-8'); }
+
+async function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[^a-z]/g, ''));
+  const col = (row, names) => { for (const n of names) { const i = headers.indexOf(n); if (i >= 0 && row[i] !== undefined) return row[i].trim(); } return ''; };
+  let insertedCount = 0, updatedCount = 0;
+  
+  for (let i = 1; i < lines.length; i++) {
+    const row = lines[i].split(',');
+    const name = col(row, ['naam', 'name']);
+    const email = col(row, ['email', 'mail']);
+    const rating = parseFloat(col(row, ['rating', 'speelsterkte'])) || 9.0;
+    const matc = parseInt(col(row, ['wedstrijden', 'matches'])) || 0;
+    const wins = parseInt(col(row, ['gewonnen', 'wins'])) || 0;
+    if (!name && !email) continue;
+    const displayName = name || (email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
+    
+    const { data: existing } = await sb.from('players').select('id').eq('email', email).single();
+    let playerId;
+    
+    if (existing) {
+      playerId = existing.id;
+      await sb.from('players').update({ name: displayName, rating, matches_played: matc, wins }).eq('id', playerId);
+      updatedCount++;
+    } else {
+      const { data: newPlayer } = await sb.from('players').insert({ name: displayName, email, rating, matches_played: matc, wins }).select().single();
+      playerId = newPlayer.id;
+      insertedCount++;
+    }
+    
+    await sb.from('club_memberships').upsert({ player_id: playerId, club_id: currentClubId }, { onConflict: 'player_id, club_id' });
+  }
+  
+  await loadAll();
+  toast(`${insertedCount} nieuw, ${updatedCount} bijgewerkt.`, 'success');
+}
+
+function exportCSV() {
+  const rows = [['naam', 'email', 'rating', 'wedstrijden', 'gewonnen', 'niveau']];
+  [...players].sort((a,b) => a.rating - b.rating).forEach(p => rows.push([p.name, p.email || '', p.rating.toFixed(2), p.matches_played, p.wins, level(p.rating)]));
+  dl(rows, 'padel-ranking-' + today() + '.csv');
+}
+
+function exportMatches() {
+  const rows = [['datum', 'team_a', 'team_b', 'score_a', 'score_b', 'competitief', 'kotc']];
+  const n = id => (players.find(p => p.id === id) || {}).name || id;
+  matches.forEach(m => rows.push([
+    m.played_at?.slice(0,10),
+    (m.team_a || []).map(n).join(' & '),
+    (m.team_b || []).map(n).join(' & '),
+    (m.score_a || []).join('-'),
+    (m.score_b || []).join('-'),
+    m.competitive ? 'ja' : 'nee',
+    m.kotc ? 'ja' : 'nee'
+  ]));
+  dl(rows, 'padel-wedstrijden-' + today() + '.csv');
+}
+
+function dl(rows, fn) {
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,\uFEFF' + encodeURIComponent(csv);
+  a.download = fn;
+  a.click();
+}
+
+function today() { return new Date().toISOString().slice(0,10); }
+
+async function resetAll() {
+  if (!confirm('WAARSCHUWING: Dit verwijdert ALLE wedstrijden van deze club! Spelers blijven bestaan.')) return;
+  showLoading('Verwijderen…');
+  try {
+    await sb.from('matches').delete().eq('club_id', currentClubId);
+    await sb.from('club_settings').upsert({ club_id: currentClubId, key: 'promos', value: '0' });
+    promos = 0;
+    await loadAll();
+    closeModal('modal-reset');
+    toast('Alle clubdata verwijderd.', 'info');
+  } catch(e) { toast('Fout: ' + e.message, 'error'); }
+  hideLoading();
+}
+
+// =====================================================
+// HISTORIE
+// =====================================================
+function renderHistory() {
+  const list = document.getElementById('history-list');
+  document.getElementById('hist-sub').textContent = matches.length + ' wedstrijden';
+  if (!matches.length) { list.innerHTML = '<div style="text-align:center;padding:3rem;color:var(--text3)">Nog geen wedstrijden.</div>'; return; }
+  const n = id => (players.find(p => p.id === id) || {}).name || ('Speler ' + id);
+  list.innerHTML = matches.slice(0, 100).map(m => {
+    const tA = (m.team_a || []).map(n).join(' & '), tB = (m.team_b || []).map(n).join(' & ');
+    const sA = (m.score_a || []), sB = (m.score_b || []);
+    const wA = sA.filter((a,i) => a > sB[i]).length, wB = sB.filter((b,i) => b > sA[i]).length;
+    const sets = sA.map((a,i) => a + '-' + sB[i]).join(', ') || '–';
+    const winner = m.kotc ? 'KotC' : wA > wB ? 'Team A wint' : 'Team B wint';
+    return `<div class="history-row">
+      <div class="history-teams">
+        <div class="ht-main">${escapeHtml(tA)} vs ${escapeHtml(tB)}</div>
+        <div class="ht-sub">${m.kotc ? 'King of the Court · ' + m.kotc_level : sets + ' · ' + winner}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:7px">
+        ${m.kotc ? '<span class="kotc-tag">👑 KotC</span>' : m.competitive ? '<span class="comp-tag">Competitief</span>' : ''}
+        <span class="history-date">${fmtDate(m.played_at)}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// =====================================================
+// NAVIGATIE
+// =====================================================
+function nav(page, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  if (btn) btn.classList.add('active');
+  if (page === 'ranking') renderRanking();
+  if (page === 'wedstrijd') initWedstrijd();
+  if (page === 'spelers') renderPlayers();
+  if (page === 'historie') renderHistory();
+  if (page === 'admin') { renderAdminTable(); }
+}
+
+// =====================================================
+// DRAG & DROP
+// =====================================================
+const dz = document.getElementById('drop-zone');
+if (dz) {
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('dragover'); const f = e.dataTransfer.files[0]; if (f?.name.endsWith('.csv')) { const r = new FileReader(); r.onload = ev => parseCSV(ev.target.result); r.readAsText(f, 'utf-8'); } });
+}
+document.querySelectorAll('.modal-overlay').forEach(el => el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); }));
+
+// =====================================================
+// CHECK OF AL INGELOGD
+// =====================================================
+async function checkExistingLogin() {
+  const savedClubId = localStorage.getItem('club_id');
+  const savedSlug = localStorage.getItem('club_slug');
+  if (savedClubId && savedSlug) {
+    currentClubId = savedClubId;
+    currentClubSlug = savedSlug;
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('main-app').style.display = 'flex';
+    await loadAll();
+  }
+}
+
+// =====================================================
+// START
+// =====================================================
+checkExistingLogin();
+</script>
+</body>
+</html>
