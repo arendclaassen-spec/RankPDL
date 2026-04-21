@@ -1,0 +1,125 @@
+-- =====================================================
+-- 1. Verwijder ALLE bestaande tabellen (frisse start)
+-- =====================================================
+drop table if exists club_settings cascade;
+drop table if exists matches cascade;
+drop table if exists club_memberships cascade;
+drop table if exists clubs cascade;
+drop table if exists players cascade;
+
+-- =====================================================
+-- 2. Zet extensie aan voor UUID en wachtwoord hashing
+-- =====================================================
+create extension if not exists "pgcrypto";
+
+-- =====================================================
+-- 3. Spelers (CENTRALE gegevens: rating wordt gedeeld over clubs)
+-- =====================================================
+create table players (
+  id uuid primary key default gen_random_uuid(),
+  email text not null unique,
+  name text not null,
+  rating numeric(4,2) not null default 9.00 check (rating between 1.0 and 10.0),
+  matches_played int not null default 0 check (matches_played >= 0),
+  wins int not null default 0 check (wins >= 0),
+  created_at timestamptz default now()
+);
+
+-- =====================================================
+-- 4. Clubs (alleen de club zelf heeft een wachtwoord)
+-- =====================================================
+create table clubs (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  slug text not null unique,
+  password_hash text not null,
+  created_at timestamptz default now()
+);
+
+-- =====================================================
+-- 5. Club lidmaatschappen (welke speler is lid van welke club)
+-- =====================================================
+create table club_memberships (
+  id uuid primary key default gen_random_uuid(),
+  player_id uuid not null references players(id) on delete cascade,
+  club_id uuid not null references clubs(id) on delete cascade,
+  joined_at timestamptz not null default now(),
+  unique(player_id, club_id)
+);
+
+-- =====================================================
+-- 6. Wedstrijden (per club, maar update centrale spelers)
+-- =====================================================
+create table matches (
+  id uuid primary key default gen_random_uuid(),
+  club_id uuid not null references clubs(id) on delete cascade,
+  team_a uuid[] not null,
+  team_b uuid[] not null,
+  score_a int[] not null default '{}',
+  score_b int[] not null default '{}',
+  competitive boolean not null default true,
+  kotc boolean not null default false,
+  kotc_level text check (kotc_level in ('Beginner', 'Bronze', 'Silver', 'Gold', 'Diamond')),
+  kotc_duos jsonb,
+  played_at timestamptz not null default now()
+);
+
+-- =====================================================
+-- 7. Club instellingen (promoties teller, etc.)
+-- =====================================================
+create table club_settings (
+  club_id uuid not null references clubs(id) on delete cascade,
+  key text not null,
+  value text not null,
+  primary key (club_id, key)
+);
+
+-- =====================================================
+-- 8. Indexen voor snellere queries
+-- =====================================================
+create index idx_players_email on players(email);
+create index idx_clubs_slug on clubs(slug);
+create index idx_memberships_player on club_memberships(player_id);
+create index idx_memberships_club on club_memberships(club_id);
+create index idx_matches_club on matches(club_id);
+create index idx_matches_played_at on matches(played_at desc);
+
+-- =====================================================
+-- 9. Jouw eigen club "PlayPDL" toevoegen
+-- =====================================================
+-- Wachtwoord is: admin123 (in platte tekst - later kun je hashing toevoegen)
+insert into clubs (name, slug, password_hash) 
+values ('PlayPDL', 'playpdl', 'admin123');
+
+-- =====================================================
+-- 10. Club instellingen (promoties teller start op 0)
+-- =====================================================
+insert into club_settings (club_id, key, value)
+values ((select id from clubs where slug = 'playpdl'), 'promos', '0');
+
+-- =====================================================
+-- 11. Testdata: voeg een paar voorbeeldspelers toe
+-- =====================================================
+-- Speler 1
+insert into players (email, name, rating, matches_played, wins) 
+values ('jan.jansen@example.nl', 'Jan Jansen', 7.5, 5, 3);
+
+-- Speler 2
+insert into players (email, name, rating, matches_played, wins) 
+values ('maria.devries@example.nl', 'Maria de Vries', 8.2, 8, 4);
+
+-- Speler 3
+insert into players (email, name, rating, matches_played, wins) 
+values ('peter.klok@example.nl', 'Peter Klok', 6.8, 3, 1);
+
+-- Koppel deze spelers aan club PlayPDL
+insert into club_memberships (player_id, club_id)
+select id, (select id from clubs where slug = 'playpdl')
+from players
+where email in ('jan.jansen@example.nl', 'maria.devries@example.nl', 'peter.klok@example.nl');
+
+-- =====================================================
+-- 12. (Optioneel) Hulpfunctie om later wachtwoord te hashen
+-- =====================================================
+-- Als je later wachtwoorden veilig wilt maken, gebruik dan:
+-- update clubs set password_hash = crypt('admin123', gen_salt('bf')) where slug = 'playpdl';
