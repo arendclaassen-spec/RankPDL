@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -457,7 +458,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 // JOUW SUPABASE GEGEVENS (ingevuld)
 // =====================================================
 const SUPA_URL = 'https://jzocskzqugaggxnmqqcw.supabase.co';
-const SUPA_KEY = 'sb_publishable_lkHvpW60Wgwx8zW9f9cu3Q_7z3u-5TG';
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp6b2Nza3pxdWdhZ2d4bm1xcWN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MTQzNjgsImV4cCI6MjA5MjA5MDM2OH0.r41m9JFMjfY-GyGopOXeDMi3_IiscgGIpADtQnEPu2U';
 const sb = supabase.createClient(SUPA_URL, SUPA_KEY);
 
 // =====================================================
