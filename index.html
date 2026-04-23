@@ -226,7 +226,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   <div class="nav-sep">Beheer</div>
   <button class="nav-item admin-item" id="nav-admin-btn" onclick="nav('admin',this)" style="display:none"><span class="nav-icon">⚙️</span>Admin</button>
   <button class="nav-item" id="nav-admin-login-btn" onclick="openAdminLogin()"><span class="nav-icon">🔐</span>Admin inloggen</button>
-  <button class="nav-item admin-item" id="nav-switch-club-btn" onclick="lockAdmin()" style="display:none;margin-top:auto"><span class="nav-icon">🔄</span>Van club wisselen</button>
+  <button class="nav-item admin-item" id="nav-logout-admin-btn" onclick="logoutAdmin()" style="display:none"><span class="nav-icon">🔓</span>Admin uitloggen</button>
+  <button class="nav-item" id="nav-switch-club-btn" onclick="lockAdmin()" style="display:none;margin-top:4px"><span class="nav-icon">🔄</span>Van club wisselen</button>
 </aside>
 
 <main class="main">
@@ -367,7 +368,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
         <div style="font-size:14px;font-weight:500;margin-bottom:.5rem">CSV formaat</div>
         <div class="csv-template">naam,email,rating,wedstrijden,gewonnen<br>Lars van der Berg,lars@example.nl,9.0,0,0</div>
       </div>
-      <div class="import-zone" id="drop-zone" onclick="document.getElementById('csv-file').click()">
+      <div class="import-zone" id="drop-zone">
         <div style="font-size:36px;margin-bottom:10px">📄</div>
         <div style="font-size:15px;color:var(--text2)">Klik of sleep een CSV-bestand hier</div>
         <div style="font-size:12px;color:var(--text3);margin-top:5px">Bestaande spelers (op e-mail) worden bijgewerkt</div>
@@ -621,6 +622,7 @@ async function loginClub() {
 }
 
 function lockAdmin() {
+  // Van club wisselen: wis sessie en ga terug naar club login
   localStorage.removeItem('club_id');
   localStorage.removeItem('club_slug');
   localStorage.removeItem('club_name');
@@ -631,6 +633,14 @@ function lockAdmin() {
   setAdminMode(false);
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('main-app').style.display = 'none';
+}
+
+function logoutAdmin() {
+  // Admin uitloggen: blijf in de club, ga terug naar ranking
+  isAdmin = false;
+  setAdminMode(false);
+  nav('ranking', document.querySelector('.nav-item'));
+  toast('Admin modus uitgeschakeld', 'info');
 }
 
 function openAdminLogin() {
@@ -670,14 +680,8 @@ async function submitAdminLogin() {
 function setAdminMode(active) {
   document.getElementById('nav-admin-btn').style.display = active ? 'flex' : 'none';
   document.getElementById('nav-admin-login-btn').style.display = active ? 'none' : 'flex';
+  document.getElementById('nav-logout-admin-btn').style.display = active ? 'flex' : 'none';
   document.getElementById('nav-switch-club-btn').style.display = active ? 'flex' : 'none';
-  if (!active) {
-    // Als admin uitlogt, navigeer weg van admin pagina
-    const adminPage = document.getElementById('page-admin');
-    if (adminPage && adminPage.classList.contains('active')) {
-      nav('ranking', document.querySelector('.nav-item'));
-    }
-  }
 }
 
 async function changePassword() {
@@ -1542,17 +1546,25 @@ function nav(page, btn) {
   if (page === 'wedstrijd') initWedstrijd();
   if (page === 'spelers') renderPlayers();
   if (page === 'historie') renderHistory();
-  if (page === 'admin') { renderAdminTable(); }
+  if (page === 'admin') { renderAdminTable(); setupDropZone(); }
 }
 
 // =====================================================
-// DRAG & DROP
+// DRAG & DROP (setup via functie, zodat element bestaat)
 // =====================================================
-const dz = document.getElementById('drop-zone');
-if (dz) {
+function setupDropZone() {
+  const dz = document.getElementById('drop-zone');
+  if (!dz || dz._setup) return;
+  dz._setup = true;
+  dz.addEventListener('click', () => document.getElementById('csv-file').click());
   dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
   dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
-  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('dragover'); const f = e.dataTransfer.files[0]; if (f?.name.endsWith('.csv')) { const r = new FileReader(); r.onload = ev => parseCSV(ev.target.result); r.readAsText(f, 'utf-8'); } });
+  dz.addEventListener('drop', e => {
+    e.preventDefault();
+    dz.classList.remove('dragover');
+    const f = e.dataTransfer.files[0];
+    if (f) { const r = new FileReader(); r.onload = ev => parseCSV(ev.target.result); r.readAsText(f, 'utf-8'); }
+  });
 }
 document.querySelectorAll('.modal-overlay').forEach(el => el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); }));
 
