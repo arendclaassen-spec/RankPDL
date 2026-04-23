@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -206,6 +205,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     </div>
     <button class="btn btn-accent btn-full" onclick="loginClub()">Inloggen</button>
     <div id="login-error" style="color:var(--danger); margin-top:1rem; font-size:13px;"></div>
+    <div id="login-db-status" style="margin-top:.75rem; font-size:12px; color:var(--text3); padding:8px; background:var(--surface2); border-radius:var(--rs); display:none;"></div>
   </div>
 </div>
 
@@ -214,7 +214,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 
 <aside class="sidebar">
   <div class="logo">
-    <div class="logo-title">PlayPDL</div>
+    <img id="sidebar-logo-img" style="display:none;width:32px;height:32px;border-radius:6px;margin-bottom:6px;" src="">
+    <div class="logo-title" id="sidebar-club-name">PlayPDL</div>
     <div class="logo-sub" id="conn-status">Verbinden…</div>
   </div>
   <button class="nav-item active" onclick="nav('ranking',this)"><span class="nav-icon">🏆</span>Ranking</button>
@@ -468,6 +469,7 @@ let players = [];
 let matches = [];
 let currentClubId = null;
 let currentClubSlug = null;
+let currentClubName = null;
 let promos = 0;
 let rankFilter = 'all', rankCur = 0, adminCur = 0;
 const PAGE = 50;
@@ -517,12 +519,13 @@ function sv(id){const v=document.getElementById(id).value;return v===''?null:par
 function escapeHtml(str){if(!str)return '';return str.replace(/[&<>]/g,function(m){if(m==='&')return'&amp;';if(m==='<')return'&lt;';if(m==='>')return'&gt;';return m;});}
 
 // =====================================================
-// LOGIN FUNCTIE (FIXED)
+// LOGIN FUNCTIE (FIXED + BETERE FOUTMELDINGEN)
 // =====================================================
 async function loginClub() {
-  const slug = document.getElementById('club-slug').value.trim();
+  const slug = document.getElementById('club-slug').value.trim().toLowerCase();
   const password = document.getElementById('club-password').value;
   const errorDiv = document.getElementById('login-error');
+  errorDiv.textContent = '';
   
   if (!slug || !password) {
     errorDiv.textContent = 'Vul clubcode en wachtwoord in.';
@@ -532,14 +535,33 @@ async function loginClub() {
   showLoading('Inloggen...');
   
   try {
+    // Test eerst of Supabase bereikbaar is
+    const { data: testData, error: testError } = await sb
+      .from('clubs')
+      .select('count', { count: 'exact', head: true });
+    
+    if (testError) {
+      errorDiv.innerHTML = `Verbindingsfout met database.<br><small style="color:var(--text3)">${testError.message}</small>`;
+      console.error('Supabase verbindingsfout:', testError);
+      hideLoading();
+      return;
+    }
+
     const { data: club, error } = await sb
       .from('clubs')
-      .select('id, name, password')
+      .select('id, name, password, logo_url')
       .eq('slug', slug)
-      .single();
+      .maybeSingle();
     
-    if (error || !club) {
-      errorDiv.textContent = 'Club niet gevonden.';
+    if (error) {
+      errorDiv.innerHTML = `Database fout: ${error.message}<br><small style="color:var(--text3)">Code: ${error.code}</small>`;
+      console.error('Login fout:', error);
+      hideLoading();
+      return;
+    }
+
+    if (!club) {
+      errorDiv.innerHTML = `Club "<strong>${slug}</strong>" niet gevonden.<br><small style="color:var(--text3)">Controleer de clubcode (bijv. "playpdl")</small>`;
       hideLoading();
       return;
     }
@@ -552,17 +574,28 @@ async function loginClub() {
     
     currentClubId = club.id;
     currentClubSlug = slug;
+    currentClubName = club.name;
     localStorage.setItem('club_id', club.id);
     localStorage.setItem('club_slug', slug);
+    localStorage.setItem('club_name', club.name);
+    
+    // Update sidebar naam
+    document.getElementById('sidebar-club-name').textContent = club.name;
+    if (club.logo_url) {
+      document.getElementById('sidebar-logo-img').src = club.logo_url;
+      document.getElementById('sidebar-logo-img').style.display = 'block';
+    }
     
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('main-app').style.display = 'flex';
+    document.getElementById('conn-status').textContent = slug;
     
     await loadAll();
     hideLoading();
     
   } catch (e) {
-    errorDiv.textContent = 'Fout: ' + e.message;
+    errorDiv.innerHTML = `Onverwachte fout: ${e.message}`;
+    console.error('Login exception:', e);
     hideLoading();
   }
 }
@@ -570,7 +603,10 @@ async function loginClub() {
 function lockAdmin() {
   localStorage.removeItem('club_id');
   localStorage.removeItem('club_slug');
+  localStorage.removeItem('club_name');
   currentClubId = null;
+  currentClubSlug = null;
+  currentClubName = null;
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('main-app').style.display = 'none';
 }
@@ -1445,9 +1481,13 @@ document.querySelectorAll('.modal-overlay').forEach(el => el.addEventListener('c
 async function checkExistingLogin() {
   const savedClubId = localStorage.getItem('club_id');
   const savedSlug = localStorage.getItem('club_slug');
+  const savedName = localStorage.getItem('club_name');
   if (savedClubId && savedSlug) {
     currentClubId = savedClubId;
     currentClubSlug = savedSlug;
+    currentClubName = savedName || savedSlug;
+    document.getElementById('sidebar-club-name').textContent = currentClubName;
+    document.getElementById('conn-status').textContent = savedSlug;
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('main-app').style.display = 'flex';
     await loadAll();
@@ -1455,8 +1495,39 @@ async function checkExistingLogin() {
 }
 
 // =====================================================
+// VERBINDINGSTEST BIJ OPSTARTEN
+// =====================================================
+async function testConnection() {
+  const statusEl = document.getElementById('login-db-status');
+  if (!statusEl) return;
+  statusEl.style.display = 'block';
+  statusEl.style.color = 'var(--text3)';
+  statusEl.textContent = '⏳ Verbinding testen…';
+  try {
+    const { data, error } = await sb.from('clubs').select('slug, name').limit(5);
+    if (error) {
+      statusEl.style.color = 'var(--danger)';
+      statusEl.innerHTML = `❌ Database fout: ${error.message} (code: ${error.code})`;
+      return;
+    }
+    if (!data || data.length === 0) {
+      statusEl.style.color = 'var(--warn)';
+      statusEl.innerHTML = `⚠️ Verbinding OK, maar geen clubs gevonden in database.<br>Voer het SQL-script uit in Supabase om de testclub aan te maken.`;
+      return;
+    }
+    const clubNames = data.map(c => c.slug).join(', ');
+    statusEl.style.color = 'var(--accent)';
+    statusEl.innerHTML = `✅ Verbonden · Beschikbare clubs: <strong>${clubNames}</strong>`;
+  } catch (e) {
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = `❌ Verbinding mislukt: ${e.message}`;
+  }
+}
+
+// =====================================================
 // START
 // =====================================================
+testConnection();
 checkExistingLogin();
 </script>
 </body>
