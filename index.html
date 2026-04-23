@@ -1362,7 +1362,6 @@ function handleCSV(e) { const f = e.target.files[0]; if (!f) return; const r = n
 // DIRECTE REST HELPER (omzeilt supabase-js headers/preflight)
 // =====================================================
 async function restFetch(method, path, body) {
-  // Bepaal Prefer header: upsert paths krijgen merge-duplicates
   const isUpsert = path.includes('on_conflict');
   const preferParts = [];
   if (isUpsert) preferParts.push('resolution=merge-duplicates');
@@ -1375,11 +1374,14 @@ async function restFetch(method, path, body) {
       'apikey': SUPA_KEY,
       'Authorization': `Bearer ${SUPA_KEY}`,
       'Content-Type': 'application/json',
+      'Range-Unit': 'items',
+      'Range': '0-9999999', // Verwijder de standaard 1000-rijen limiet
       ...(preferParts.length ? { 'Prefer': preferParts.join(',') } : {})
     },
     body: body ? JSON.stringify(body) : undefined
   });
-  if (!res.ok) {
+  // 206 Partial Content is ook OK
+  if (!res.ok && res.status !== 206) {
     const err = await res.text();
     throw new Error(`${method} ${path} → ${res.status}: ${err}`);
   }
@@ -1438,18 +1440,14 @@ async function parseCSV(text) {
       })));
     }
 
-    // Stap 2: haal alle IDs op via email (paginering, 1000 per keer)
+    // Stap 2: haal alle IDs op in één keer (Range header heft limiet op)
     document.getElementById('loading-text').textContent = 'Speler-IDs ophalen…';
     const emails = rows.map(r => r.email);
+    const emailSet = new Set(emails);
     const emailMap = new Map(); // email -> id
-    let offset = 0;
-    while (true) {
-      const batch = await restFetch('GET', `players?select=id,email&limit=1000&offset=${offset}`);
-      if (!batch || batch.length === 0) break;
-      batch.forEach(p => { if (emails.includes(p.email)) emailMap.set(p.email, p.id); });
-      if (batch.length < 1000) break;
-      offset += 1000;
-    }
+    const allPlayers = await restFetch('GET', 'players?select=id,email');
+    (allPlayers || []).forEach(p => { if (emailSet.has(p.email)) emailMap.set(p.email, p.id); });
+    console.log(`IDs gevonden: ${emailMap.size} van ${emails.length}`);
 
     // Stap 3: memberships aanmaken voor gevonden spelers
     document.getElementById('loading-text').textContent = 'Koppelen aan club…';
