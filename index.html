@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -1424,62 +1425,36 @@ async function parseCSV(text) {
   showLoading(`Bezig met importeren van ${rows.length} spelers…`);
 
   try {
-    const CHUNK = 200;
+    const CHUNK = 100; // Klein genoeg voor stabiele requests
 
-    // Stap 1: haal bestaande spelers op in chunks van 200 emails
-    document.getElementById('loading-text').textContent = 'Bestaande spelers ophalen…';
-    const existingMap = new Map();
-    const emails = rows.map(r => r.email);
-    for (let i = 0; i < emails.length; i += CHUNK) {
-      const chunk = emails.slice(i, i + CHUNK);
-      const emailFilter = chunk.map(e => `email.eq.${encodeURIComponent(e)}`).join(',');
-      const data = await restFetch('GET', `players?select=id,email&or=(${emailFilter})`);
-      (data || []).forEach(p => existingMap.set(p.email, p.id));
+    // Stap 1: upsert alle spelers in één keer op email conflict
+    // Dit maakt nieuwe aan EN update bestaande in één operatie
+    let allPlayerIds = [];
+    const total = rows.length;
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK);
+      const pct = Math.round(((i + chunk.length) / total) * 100);
+      document.getElementById('loading-text').textContent = `Spelers verwerken ${i + chunk.length} / ${total} (${pct}%)…`;
+      const inserted = await restFetch('POST', 'players?on_conflict=email&select=id,email', chunk.map(r => ({
+        name: r.name, email: r.email, rating: r.rating,
+        matches_played: r.matches_played, wins: r.wins
+      })));
+      (inserted || []).forEach(p => allPlayerIds.push({ email: p.email, id: p.id }));
     }
 
-    const toInsert = rows.filter(r => !existingMap.has(r.email));
-    const toUpdate = rows.filter(r => existingMap.has(r.email));
-
-    // Stap 2: batch insert nieuwe spelers
-    if (toInsert.length > 0) {
-      document.getElementById('loading-text').textContent = `${toInsert.length} nieuwe spelers aanmaken…`;
-      for (let i = 0; i < toInsert.length; i += CHUNK) {
-        const chunk = toInsert.slice(i, i + CHUNK);
-        const inserted = await restFetch('POST', 'players?select=id,email', chunk.map(r => ({
-          name: r.name, email: r.email, rating: r.rating,
-          matches_played: r.matches_played, wins: r.wins
-        })));
-        (inserted || []).forEach(p => existingMap.set(p.email, p.id));
-      }
-    }
-
-    // Stap 3: update bestaande spelers via upsert
-    if (toUpdate.length > 0) {
-      document.getElementById('loading-text').textContent = `${toUpdate.length} bestaande spelers bijwerken…`;
-      for (let i = 0; i < toUpdate.length; i += CHUNK) {
-        const chunk = toUpdate.slice(i, i + CHUNK);
-        await restFetch('POST', 'players?on_conflict=email', chunk.map(r => ({
-          id: existingMap.get(r.email),
-          name: r.name, email: r.email, rating: r.rating,
-          matches_played: r.matches_played, wins: r.wins
-        })));
-      }
-    }
-
-    // Stap 4: koppel alle spelers aan club via memberships upsert
-    document.getElementById('loading-text').textContent = 'Koppelen aan club…';
-    const memberships = rows
-      .map(r => ({ player_id: existingMap.get(r.email), club_id: currentClubId }))
-      .filter(m => m.player_id);
-
+    // Stap 2: koppel alle spelers aan club
+    document.getElementById('loading-text').textContent = `Koppelen aan club…`;
+    const memberships = allPlayerIds.map(p => ({ player_id: p.id, club_id: currentClubId }));
     for (let i = 0; i < memberships.length; i += CHUNK) {
       const chunk = memberships.slice(i, i + CHUNK);
+      const pct = Math.round(((i + chunk.length) / memberships.length) * 100);
+      document.getElementById('loading-text').textContent = `Koppelen aan club ${i + chunk.length} / ${memberships.length} (${pct}%)…`;
       await restFetch('POST', 'club_memberships?on_conflict=player_id%2Cclub_id', chunk);
     }
 
     await loadAll();
     hideLoading();
-    toast(`✅ ${toInsert.length} nieuw · ${toUpdate.length} bijgewerkt · ${memberships.length} gekoppeld aan club`, 'success');
+    toast(`✅ ${allPlayerIds.length} spelers verwerkt en gekoppeld aan club`, 'success');
 
   } catch(e) {
     hideLoading();
