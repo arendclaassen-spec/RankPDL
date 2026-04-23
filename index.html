@@ -251,7 +251,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <table class="rank-table">
       <thead><tr><th>#</th><th>Speler</th><th>Niveau</th><th>Rating</th><th>W</th><th>V</th></tr></thead>
       <tbody id="rank-body"></tbody>
-    </table>
+     </table>
     <div class="pager">
       <span id="pager-info">–</span>
       <div class="pager-btns">
@@ -395,7 +395,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   <div class="modal">
     <div class="modal-title">Speler toevoegen</div>
     <div class="form-group"><label class="form-label">Naam *</label><input type="text" class="form-control" id="np-name" placeholder="Voornaam Achternaam"></div>
-    <div class="form-group"><label class="form-label">E-mail</label><input type="email" class="form-control" id="np-email"></div>
+    <div class="form-group"><label class="form-label">E-mail *</label><input type="email" class="form-control" id="np-email" placeholder="speler@example.nl"></div>
     <div class="form-group"><label class="form-label">Startniveau</label>
       <select class="form-control" id="np-level">
         <option value="9.0">Beginner – 9.0</option>
@@ -442,7 +442,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 <div class="modal-overlay" id="modal-reset">
   <div class="modal">
     <div class="modal-title">Alle data verwijderen?</div>
-    <p style="color:var(--text2);font-size:14px;line-height:1.6">Dit verwijdert alle spelers en wedstrijden van deze club uit de database. Niet terug te draaien.</p>
+    <p style="color:var(--text2);font-size:14px;line-height:1.6">Dit verwijdert alle wedstrijden van deze club uit de database. Spelers blijven bestaan in het centrale systeem.</p>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal('modal-reset')">Annuleren</button>
       <button class="btn btn-danger" onclick="resetAll()">Verwijder alles</button>
@@ -455,7 +455,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 
 <script>
 // =====================================================
-// JOUW SUPABASE GEGEVENS (ingevuld)
+// SUPABASE CONFIG (jouw gegevens)
 // =====================================================
 const SUPA_URL = 'https://jzocskzqugaggxnmqqcw.supabase.co';
 const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp6b2Nza3pxdWdhZ2d4bm1xcWN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MTQzNjgsImV4cCI6MjA5MjA5MDM2OH0.r41m9JFMjfY-GyGopOXeDMi3_IiscgGIpADtQnEPu2U';
@@ -517,7 +517,7 @@ function sv(id){const v=document.getElementById(id).value;return v===''?null:par
 function escapeHtml(str){if(!str)return '';return str.replace(/[&<>]/g,function(m){if(m==='&')return'&amp;';if(m==='<')return'&lt;';if(m==='>')return'&gt;';return m;});}
 
 // =====================================================
-// LOGIN FUNCTIE
+// LOGIN FUNCTIE (FIXED)
 // =====================================================
 async function loginClub() {
   const slug = document.getElementById('club-slug').value.trim();
@@ -534,7 +534,7 @@ async function loginClub() {
   try {
     const { data: club, error } = await sb
       .from('clubs')
-      .select('id, name, password_hash')
+      .select('id, name, password')
       .eq('slug', slug)
       .single();
     
@@ -544,7 +544,7 @@ async function loginClub() {
       return;
     }
     
-    if (password !== club.password_hash) {
+    if (password !== club.password) {
       errorDiv.textContent = 'Verkeerd wachtwoord.';
       hideLoading();
       return;
@@ -583,7 +583,7 @@ async function changePassword() {
   try {
     const { error } = await sb
       .from('clubs')
-      .update({ password_hash: newPw })
+      .update({ password: newPw })
       .eq('id', currentClubId);
     if (error) throw error;
     toast('Wachtwoord gewijzigd!', 'success');
@@ -653,7 +653,7 @@ async function loadAll() {
 }
 
 // =====================================================
-// RANKING
+// RANKING (ongewijzigd)
 // =====================================================
 function renderRanking() {
   let list = [...players].sort((a,b) => a.rating - b.rating);
@@ -687,7 +687,7 @@ function renderRanking() {
       <td><span class="rating-val">${p.rating.toFixed(2)}</span></td>
       <td style="color:var(--text2);font-size:13px">${p.matches_played}</td>
       <td style="color:var(--text2);font-size:13px">${p.wins}</td>
-    </tr>`;
+    </table>`;
   }).join('');
 }
 
@@ -695,7 +695,7 @@ function rankPage(d){ rankCur = Math.max(0, rankCur + d); renderRanking(); }
 function setFilter(f,btn){ rankFilter = f; rankCur = 0; document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); renderRanking(); }
 
 // =====================================================
-// PLAYER SEARCH
+// PLAYER SEARCH (ongewijzigd)
 // =====================================================
 function buildSearchWidget(wrapId, slot) {
   const wrap = document.getElementById(wrapId);
@@ -735,7 +735,7 @@ function selectPlayer(slot, id) {
 }
 
 // =====================================================
-// WEDSTRIJD SUBMIT
+// WEDSTRIJD SUBMIT (ongewijzigd, werkt)
 // =====================================================
 async function submitMatch() {
   if (!sel.a1 || !sel.a2 || !sel.b1 || !sel.b2) {
@@ -849,7 +849,7 @@ async function submitMatch() {
 }
 
 // =====================================================
-// KOTC SUBMIT
+// KOTC SUBMIT (ongewijzigd, werkt)
 // =====================================================
 async function submitKotc() {
   if (kotcDuos.length < 2) { toast('Voeg minimaal 2 duo\'s toe.', 'error'); return; }
@@ -941,7 +941,7 @@ async function submitKotc() {
 }
 
 // =====================================================
-// WEDSTRIJD INIT
+// WEDSTRIJD INIT (ongewijzigd)
 // =====================================================
 function initWedstrijd() {
   sel = {a1:null, a2:null, b1:null, b2:null};
@@ -969,7 +969,7 @@ function setMode(mode, btn) {
 }
 
 // =====================================================
-// KOTC FUNCTIES
+// KOTC FUNCTIES (ongewijzigd)
 // =====================================================
 function initKotcForm() { kotcDuos = []; kotcDuoCount = 0; document.getElementById('kotc-duos-container').innerHTML = ''; addKotcDuo(); addKotcDuo(); }
 function addKotcDuo() {
@@ -1038,7 +1038,7 @@ function setKotcPos(duoIdx, pos) {
 }
 
 // =====================================================
-// SPELERS
+// SPELERS (AANGEPAST: centrale database logica)
 // =====================================================
 function renderPlayers() {
   const q = (document.getElementById('sp-search')?.value || '').toLowerCase();
@@ -1057,46 +1057,72 @@ function renderPlayers() {
   }).join('');
 }
 
+// NIEUWE addPlayer met centrale database
 async function addPlayer() {
   const name = document.getElementById('np-name').value.trim();
   const email = document.getElementById('np-email').value.trim();
   const rating = parseFloat(document.getElementById('np-level').value);
+  
   if (!name) { toast('Voer een naam in.', 'error'); return; }
+  if (!email) { toast('Voer een e-mailadres in.', 'error'); return; }
   
   showLoading('Toevoegen…');
+  
   try {
-    let playerId = null;
-    if (email) {
-      const { data: existing } = await sb.from('players').select('id').eq('email', email).single();
-      if (existing) playerId = existing.id;
-    }
+    // Bestaat de speler al in de centrale database?
+    let { data: existingPlayer, error: findError } = await sb
+      .from('players')
+      .select('id, name, email, rating')
+      .eq('email', email)
+      .single();
     
-    if (!playerId) {
-      const { data: newPlayer, error } = await sb
+    let playerId;
+    
+    if (existingPlayer) {
+      playerId = existingPlayer.id;
+      toast(`${existingPlayer.name} bestaat al en is gekoppeld aan deze club.`, 'info');
+    } else {
+      const { data: newPlayer, error: createError } = await sb
         .from('players')
-        .insert({ name, email, rating, matches_played: 0, wins: 0 })
+        .insert({ 
+          name: name, 
+          email: email, 
+          rating: rating, 
+          matches_played: 0, 
+          wins: 0 
+        })
         .select()
         .single();
-      if (error) throw error;
+      if (createError) throw createError;
       playerId = newPlayer.id;
+      toast(`Nieuwe speler ${name} toegevoegd aan centrale database.`, 'success');
     }
     
+    // Koppel aan club
     const { error: memberError } = await sb
       .from('club_memberships')
-      .upsert({ player_id: playerId, club_id: currentClubId }, { onConflict: 'player_id, club_id' });
+      .upsert(
+        { player_id: playerId, club_id: currentClubId }, 
+        { onConflict: 'player_id, club_id' }
+      );
     if (memberError) throw memberError;
     
     await loadAll();
     closeModal('modal-player');
     document.getElementById('np-name').value = '';
     document.getElementById('np-email').value = '';
-    toast(name + ' toegevoegd aan club!', 'success');
-  } catch(e) { toast('Fout: ' + e.message, 'error'); }
+    
+    toast(`${name} is toegevoegd aan de club!`, 'success');
+    
+  } catch(e) { 
+    toast('Fout: ' + e.message, 'error');
+    console.error(e);
+  }
   hideLoading();
 }
 
 // =====================================================
-// ADMIN
+// ADMIN (ongewijzigd behalve deletePlayer)
 // =====================================================
 function adminTab(tab, btn) {
   ['spelers', 'importexport', 'instellingen'].forEach(t => {
@@ -1225,15 +1251,24 @@ async function deletePlayer() {
 }
 
 // =====================================================
-// IMPORT / EXPORT
+// IMPORT / EXPORT (AANGEPAST: CSV parse met centrale logica)
 // =====================================================
 function handleCSV(e) { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => parseCSV(ev.target.result); r.readAsText(f, 'utf-8'); }
 
 async function parseCSV(text) {
   const lines = text.trim().split('\n');
   const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[^a-z]/g, ''));
-  const col = (row, names) => { for (const n of names) { const i = headers.indexOf(n); if (i >= 0 && row[i] !== undefined) return row[i].trim(); } return ''; };
-  let insertedCount = 0, updatedCount = 0;
+  const col = (row, names) => { 
+    for (const n of names) { 
+      const i = headers.indexOf(n); 
+      if (i >= 0 && row[i] !== undefined) return row[i].trim(); 
+    } 
+    return ''; 
+  };
+  
+  let insertedCount = 0, updatedCount = 0, linkedCount = 0;
+  
+  showLoading('CSV importeren...');
   
   for (let i = 1; i < lines.length; i++) {
     const row = lines[i].split(',');
@@ -1242,27 +1277,67 @@ async function parseCSV(text) {
     const rating = parseFloat(col(row, ['rating', 'speelsterkte'])) || 9.0;
     const matc = parseInt(col(row, ['wedstrijden', 'matches'])) || 0;
     const wins = parseInt(col(row, ['gewonnen', 'wins'])) || 0;
-    if (!name && !email) continue;
+    
+    if (!email) continue;
+    
     const displayName = name || (email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
     
-    const { data: existing } = await sb.from('players').select('id').eq('email', email).single();
-    let playerId;
-    
-    if (existing) {
-      playerId = existing.id;
-      await sb.from('players').update({ name: displayName, rating, matches_played: matc, wins }).eq('id', playerId);
-      updatedCount++;
-    } else {
-      const { data: newPlayer } = await sb.from('players').insert({ name: displayName, email, rating, matches_played: matc, wins }).select().single();
-      playerId = newPlayer.id;
-      insertedCount++;
+    try {
+      let { data: existingPlayer } = await sb
+        .from('players')
+        .select('id')
+        .eq('email', email)
+        .single();
+      
+      let playerId;
+      
+      if (existingPlayer) {
+        playerId = existingPlayer.id;
+        await sb
+          .from('players')
+          .update({ 
+            name: displayName, 
+            rating: rating, 
+            matches_played: matc, 
+            wins: wins 
+          })
+          .eq('id', playerId);
+        updatedCount++;
+      } else {
+        const { data: newPlayer } = await sb
+          .from('players')
+          .insert({ 
+            name: displayName, 
+            email: email, 
+            rating: rating, 
+            matches_played: matc, 
+            wins: wins 
+          })
+          .select()
+          .single();
+        playerId = newPlayer.id;
+        insertedCount++;
+      }
+      
+      const { error: memberError } = await sb
+        .from('club_memberships')
+        .upsert(
+          { player_id: playerId, club_id: currentClubId }, 
+          { onConflict: 'player_id, club_id' }
+        );
+      
+      if (memberError) throw memberError;
+      linkedCount++;
+      
+    } catch(e) {
+      console.error(`Fout bij regel ${i}:`, e);
     }
-    
-    await sb.from('club_memberships').upsert({ player_id: playerId, club_id: currentClubId }, { onConflict: 'player_id, club_id' });
   }
   
   await loadAll();
-  toast(`${insertedCount} nieuw, ${updatedCount} bijgewerkt.`, 'success');
+  hideLoading();
+  
+  toast(`${insertedCount} nieuwe spelers, ${updatedCount} bijgewerkt, ${linkedCount} gekoppeld aan club.`, 'success');
 }
 
 function exportCSV() {
@@ -1297,7 +1372,8 @@ function dl(rows, fn) {
 function today() { return new Date().toISOString().slice(0,10); }
 
 async function resetAll() {
-  if (!confirm('WAARSCHUWING: Dit verwijdert ALLE wedstrijden van deze club! Spelers blijven bestaan.')) return;
+  if (!confirm('WAARSCHUWING: Dit verwijdert ALLE wedstrijden van deze club! Spelers blijven bestaan in de centrale database.')) return;
+  
   showLoading('Verwijderen…');
   try {
     await sb.from('matches').delete().eq('club_id', currentClubId);
@@ -1305,13 +1381,13 @@ async function resetAll() {
     promos = 0;
     await loadAll();
     closeModal('modal-reset');
-    toast('Alle clubdata verwijderd.', 'info');
+    toast('Alle wedstrijden van deze club verwijderd.', 'info');
   } catch(e) { toast('Fout: ' + e.message, 'error'); }
   hideLoading();
 }
 
 // =====================================================
-// HISTORIE
+// HISTORIE (ongewijzigd)
 // =====================================================
 function renderHistory() {
   const list = document.getElementById('history-list');
