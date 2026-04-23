@@ -223,7 +223,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   <button class="nav-item" onclick="nav('spelers',this)"><span class="nav-icon">👥</span>Spelers</button>
   <button class="nav-item" onclick="nav('historie',this)"><span class="nav-icon">📋</span>Historie</button>
   <div class="nav-sep">Beheer</div>
-  <button class="nav-item admin-item" onclick="nav('admin',this)"><span class="nav-icon">⚙️</span>Admin</button>
+  <button class="nav-item admin-item" id="nav-admin-btn" onclick="nav('admin',this)" style="display:none"><span class="nav-icon">⚙️</span>Admin</button>
+  <button class="nav-item" id="nav-admin-login-btn" onclick="openAdminLogin()"><span class="nav-icon">🔐</span>Admin inloggen</button>
+  <button class="nav-item admin-item" id="nav-switch-club-btn" onclick="lockAdmin()" style="display:none;margin-top:auto"><span class="nav-icon">🔄</span>Van club wisselen</button>
 </aside>
 
 <main class="main">
@@ -451,6 +453,22 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   </div>
 </div>
 
+<div class="modal-overlay" id="modal-admin-login">
+  <div class="modal">
+    <div class="modal-title">🔐 Admin inloggen</div>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:1rem;line-height:1.5">Voer het clubwachtwoord in om de adminmodus te activeren.</p>
+    <div class="form-group">
+      <label class="form-label">Wachtwoord</label>
+      <input type="password" class="form-control" id="admin-pw-input" placeholder="••••••" onkeydown="if(event.key==='Enter')submitAdminLogin()">
+    </div>
+    <div id="admin-login-error" style="color:var(--danger);font-size:13px;margin-top:.5rem;display:none"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('modal-admin-login')">Annuleren</button>
+      <button class="btn btn-accent" onclick="submitAdminLogin()">Inloggen</button>
+    </div>
+  </div>
+</div>
+
 <div class="loading-overlay" id="loading"><div class="spinner"></div><div class="loading-text" id="loading-text">Laden…</div></div>
 <div id="toast"></div>
 
@@ -470,6 +488,7 @@ let matches = [];
 let currentClubId = null;
 let currentClubSlug = null;
 let currentClubName = null;
+let isAdmin = false;
 let promos = 0;
 let rankFilter = 'all', rankCur = 0, adminCur = 0;
 const PAGE = 50;
@@ -607,8 +626,57 @@ function lockAdmin() {
   currentClubId = null;
   currentClubSlug = null;
   currentClubName = null;
+  isAdmin = false;
+  setAdminMode(false);
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('main-app').style.display = 'none';
+}
+
+function openAdminLogin() {
+  document.getElementById('admin-pw-input').value = '';
+  document.getElementById('admin-login-error').style.display = 'none';
+  openModal('modal-admin-login');
+  setTimeout(() => document.getElementById('admin-pw-input').focus(), 100);
+}
+
+async function submitAdminLogin() {
+  const pw = document.getElementById('admin-pw-input').value;
+  const errEl = document.getElementById('admin-login-error');
+  errEl.style.display = 'none';
+  if (!pw) { errEl.textContent = 'Voer het wachtwoord in.'; errEl.style.display = 'block'; return; }
+
+  showLoading('Controleren…');
+  try {
+    const { data: club, error } = await sb
+      .from('clubs')
+      .select('password')
+      .eq('id', currentClubId)
+      .single();
+    hideLoading();
+    if (error || !club) { errEl.textContent = 'Fout bij ophalen clubgegevens.'; errEl.style.display = 'block'; return; }
+    if (pw !== club.password) { errEl.textContent = 'Verkeerd wachtwoord.'; errEl.style.display = 'block'; return; }
+    isAdmin = true;
+    setAdminMode(true);
+    closeModal('modal-admin-login');
+    toast('Admin modus actief', 'success');
+  } catch(e) {
+    hideLoading();
+    errEl.textContent = 'Fout: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+function setAdminMode(active) {
+  document.getElementById('nav-admin-btn').style.display = active ? 'flex' : 'none';
+  document.getElementById('nav-admin-login-btn').style.display = active ? 'none' : 'flex';
+  document.getElementById('nav-switch-club-btn').style.display = active ? 'flex' : 'none';
+  if (!active) {
+    // Als admin uitlogt, navigeer weg van admin pagina
+    const adminPage = document.getElementById('page-admin');
+    if (adminPage && adminPage.classList.contains('active')) {
+      nav('ranking', document.querySelector('.nav-item'));
+    }
+  }
 }
 
 async function changePassword() {
@@ -1292,88 +1360,100 @@ async function deletePlayer() {
 function handleCSV(e) { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => parseCSV(ev.target.result); r.readAsText(f, 'utf-8'); }
 
 async function parseCSV(text) {
-  const lines = text.trim().split('\n');
+  const lines = text.trim().split('\n').filter(l => l.trim());
+  if (lines.length < 2) { toast('CSV is leeg of heeft geen datarijen.', 'error'); return; }
+
   const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[^a-z]/g, ''));
-  const col = (row, names) => { 
-    for (const n of names) { 
-      const i = headers.indexOf(n); 
-      if (i >= 0 && row[i] !== undefined) return row[i].trim(); 
-    } 
-    return ''; 
+  const col = (row, names) => {
+    for (const n of names) {
+      const i = headers.indexOf(n);
+      if (i >= 0 && row[i] !== undefined) return row[i].trim();
+    }
+    return '';
   };
-  
-  let insertedCount = 0, updatedCount = 0, linkedCount = 0;
-  
-  showLoading('CSV importeren...');
-  
+
+  // Parse alle rijen eerst lokaal
+  const rows = [];
   for (let i = 1; i < lines.length; i++) {
     const row = lines[i].split(',');
-    const name = col(row, ['naam', 'name']);
-    const email = col(row, ['email', 'mail']);
-    const rating = parseFloat(col(row, ['rating', 'speelsterkte'])) || 9.0;
-    const matc = parseInt(col(row, ['wedstrijden', 'matches'])) || 0;
-    const wins = parseInt(col(row, ['gewonnen', 'wins'])) || 0;
-    
+    const email = col(row, ['email', 'mail']).toLowerCase();
     if (!email) continue;
-    
-    const displayName = name || (email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
-    
-    try {
-      let { data: existingPlayer } = await sb
-        .from('players')
-        .select('id')
-        .eq('email', email)
-        .single();
-      
-      let playerId;
-      
-      if (existingPlayer) {
-        playerId = existingPlayer.id;
-        await sb
-          .from('players')
-          .update({ 
-            name: displayName, 
-            rating: rating, 
-            matches_played: matc, 
-            wins: wins 
-          })
-          .eq('id', playerId);
-        updatedCount++;
-      } else {
-        const { data: newPlayer } = await sb
-          .from('players')
-          .insert({ 
-            name: displayName, 
-            email: email, 
-            rating: rating, 
-            matches_played: matc, 
-            wins: wins 
-          })
-          .select()
-          .single();
-        playerId = newPlayer.id;
-        insertedCount++;
-      }
-      
-      const { error: memberError } = await sb
-        .from('club_memberships')
-        .upsert(
-          { player_id: playerId, club_id: currentClubId }, 
-          { onConflict: 'player_id, club_id' }
-        );
-      
-      if (memberError) throw memberError;
-      linkedCount++;
-      
-    } catch(e) {
-      console.error(`Fout bij regel ${i}:`, e);
-    }
+    const name = col(row, ['naam', 'name']);
+    rows.push({
+      email,
+      name: name || (email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())),
+      rating: Math.min(9, Math.max(1, parseFloat(col(row, ['rating', 'speelsterkte'])) || 9.0)),
+      matches_played: parseInt(col(row, ['wedstrijden', 'matches'])) || 0,
+      wins: parseInt(col(row, ['gewonnen', 'wins'])) || 0,
+    });
   }
-  
-  await loadAll();
-  hideLoading();
-  
-  toast(`${insertedCount} nieuwe spelers, ${updatedCount} bijgewerkt, ${linkedCount} gekoppeld aan club.`, 'success');
+
+  if (!rows.length) { toast('Geen geldige rijen gevonden (e-mail verplicht).', 'error'); return; }
+
+  showLoading(`0 / ${rows.length} spelers importeren…`);
+
+  try {
+    // Stap 1: haal alle bestaande spelers op via email (één query)
+    const emails = rows.map(r => r.email);
+    const { data: existing, error: fetchErr } = await sb
+      .from('players')
+      .select('id, email')
+      .in('email', emails);
+    if (fetchErr) throw fetchErr;
+
+    const existingMap = new Map((existing || []).map(p => [p.email, p.id]));
+
+    // Stap 2: splits in nieuwe en bestaande spelers
+    const toInsert = rows.filter(r => !existingMap.has(r.email));
+    const toUpdate = rows.filter(r => existingMap.has(r.email));
+
+    document.getElementById('loading-text').textContent = `Spelers verwerken…`;
+
+    // Stap 3: batch insert nieuwe spelers
+    let insertedIds = [];
+    if (toInsert.length > 0) {
+      const { data: inserted, error: insertErr } = await sb
+        .from('players')
+        .insert(toInsert.map(r => ({ name: r.name, email: r.email, rating: r.rating, matches_played: r.matches_played, wins: r.wins })))
+        .select('id, email');
+      if (insertErr) throw insertErr;
+      insertedIds = inserted || [];
+      insertedIds.forEach(p => existingMap.set(p.email, p.id));
+    }
+
+    // Stap 4: batch update bestaande spelers (max 50 tegelijk)
+    const CHUNK = 50;
+    for (let i = 0; i < toUpdate.length; i += CHUNK) {
+      const chunk = toUpdate.slice(i, i + CHUNK);
+      document.getElementById('loading-text').textContent = `Bijwerken ${i + chunk.length} / ${toUpdate.length}…`;
+      await Promise.all(chunk.map(r =>
+        sb.from('players').update({ name: r.name, rating: r.rating, matches_played: r.matches_played, wins: r.wins }).eq('email', r.email)
+      ));
+    }
+
+    // Stap 5: batch upsert memberships
+    document.getElementById('loading-text').textContent = `Koppelen aan club…`;
+    const memberships = rows
+      .map(r => ({ player_id: existingMap.get(r.email), club_id: currentClubId }))
+      .filter(m => m.player_id);
+
+    for (let i = 0; i < memberships.length; i += CHUNK) {
+      const chunk = memberships.slice(i, i + CHUNK);
+      const { error: memberErr } = await sb
+        .from('club_memberships')
+        .upsert(chunk, { onConflict: 'player_id,club_id' });
+      if (memberErr) throw memberErr;
+    }
+
+    await loadAll();
+    hideLoading();
+    toast(`✅ ${toInsert.length} nieuw · ${toUpdate.length} bijgewerkt · ${memberships.length} gekoppeld`, 'success');
+
+  } catch(e) {
+    hideLoading();
+    toast('Import fout: ' + e.message, 'error');
+    console.error('CSV import fout:', e);
+  }
 }
 
 function exportCSV() {
