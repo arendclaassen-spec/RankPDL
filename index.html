@@ -252,9 +252,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   </div>
   <div class="card">
     <table class="rank-table">
-      <thead><tr><th>#</th><th>Speler</th><th>Niveau</th><th>Rating</th><th>W</th><th>V</th></tr></thead>
+      <thead><tr><th>#</th><th>Speler</th><th>Niveau</th><th>Rating</th><th>W</th><th>V</th></tr>
+      </thead>
       <tbody id="rank-body"></tbody>
-     </table>
+    </table>
     <div class="pager">
       <span id="pager-info">–</span>
       <div class="pager-btns">
@@ -349,7 +350,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
       <input class="search-bar" id="admin-search" placeholder="Zoek speler…" oninput="renderAdminTable()">
       <div class="card">
         <table class="admin-table">
-          <thead><tr><th>Naam</th><th>E-mail</th><th>Rating</th><th>Niveau</th><th>Gespeeld</th><th>Gewonnen</th><th></th></tr></thead>
+          <thead><tr><th>Naam</th><th>E-mail</th><th>Rating</th><th>Niveau</th><th>Gespeeld</th><th>Gewonnen</th><th></th></tr>
+          </thead>
           <tbody id="admin-body"></tbody>
         </table>
         <div class="pager">
@@ -538,7 +540,7 @@ function sv(id){const v=document.getElementById(id).value;return v===''?null:par
 function escapeHtml(str){if(!str)return '';return str.replace(/[&<>]/g,function(m){if(m==='&')return'&amp;';if(m==='<')return'&lt;';if(m==='>')return'&gt;';return m;});}
 
 // =====================================================
-// LOGIN FUNCTIE (FIXED + BETERE FOUTMELDINGEN)
+// LOGIN FUNCTIE
 // =====================================================
 async function loginClub() {
   const slug = document.getElementById('club-slug').value.trim().toLowerCase();
@@ -554,18 +556,6 @@ async function loginClub() {
   showLoading('Inloggen...');
   
   try {
-    // Test eerst of Supabase bereikbaar is
-    const { data: testData, error: testError } = await sb
-      .from('clubs')
-      .select('count', { count: 'exact', head: true });
-    
-    if (testError) {
-      errorDiv.innerHTML = `Verbindingsfout met database.<br><small style="color:var(--text3)">${testError.message}</small>`;
-      console.error('Supabase verbindingsfout:', testError);
-      hideLoading();
-      return;
-    }
-
     const { data: club, error } = await sb
       .from('clubs')
       .select('id, name, password, logo_url')
@@ -573,14 +563,14 @@ async function loginClub() {
       .maybeSingle();
     
     if (error) {
-      errorDiv.innerHTML = `Database fout: ${error.message}<br><small style="color:var(--text3)">Code: ${error.code}</small>`;
+      errorDiv.innerHTML = `Database fout: ${error.message}`;
       console.error('Login fout:', error);
       hideLoading();
       return;
     }
 
     if (!club) {
-      errorDiv.innerHTML = `Club "<strong>${slug}</strong>" niet gevonden.<br><small style="color:var(--text3)">Controleer de clubcode (bijv. "playpdl")</small>`;
+      errorDiv.innerHTML = `Club "<strong>${slug}</strong>" niet gevonden.`;
       hideLoading();
       return;
     }
@@ -598,7 +588,6 @@ async function loginClub() {
     localStorage.setItem('club_slug', slug);
     localStorage.setItem('club_name', club.name);
     
-    // Update sidebar naam
     document.getElementById('sidebar-club-name').textContent = club.name;
     if (club.logo_url) {
       document.getElementById('sidebar-logo-img').src = club.logo_url;
@@ -671,7 +660,6 @@ function setAdminMode(active) {
   document.getElementById('nav-admin-login-btn').style.display = active ? 'none' : 'flex';
   document.getElementById('nav-switch-club-btn').style.display = active ? 'flex' : 'none';
   if (!active) {
-    // Als admin uitlogt, navigeer weg van admin pagina
     const adminPage = document.getElementById('page-admin');
     if (adminPage && adminPage.classList.contains('active')) {
       nav('ranking', document.querySelector('.nav-item'));
@@ -682,7 +670,6 @@ function setAdminMode(active) {
 async function changePassword() {
   const newPw = document.getElementById('new-pw').value.trim();
   if (!newPw) { toast('Voer een nieuw wachtwoord in.', 'error'); return; }
-  
   showLoading('Wachtwoord wijzigen...');
   try {
     const { error } = await sb
@@ -791,7 +778,7 @@ function renderRanking() {
       <td><span class="rating-val">${p.rating.toFixed(2)}</span></td>
       <td style="color:var(--text2);font-size:13px">${p.matches_played}</td>
       <td style="color:var(--text2);font-size:13px">${p.wins}</td>
-    </table>`;
+    </tr>`;
   }).join('');
 }
 
@@ -953,7 +940,7 @@ async function submitMatch() {
 }
 
 // =====================================================
-// KOTC SUBMIT (ongewijzigd, werkt)
+// KOTC SUBMIT (ongewijzigd)
 // =====================================================
 async function submitKotc() {
   if (kotcDuos.length < 2) { toast('Voeg minimaal 2 duo\'s toe.', 'error'); return; }
@@ -1142,7 +1129,7 @@ function setKotcPos(duoIdx, pos) {
 }
 
 // =====================================================
-// SPELERS (AANGEPAST: centrale database logica)
+// SPELERS (centrale database logica)
 // =====================================================
 function renderPlayers() {
   const q = (document.getElementById('sp-search')?.value || '').toLowerCase();
@@ -1161,7 +1148,6 @@ function renderPlayers() {
   }).join('');
 }
 
-// NIEUWE addPlayer met centrale database
 async function addPlayer() {
   const name = document.getElementById('np-name').value.trim();
   const email = document.getElementById('np-email').value.trim();
@@ -1173,7 +1159,6 @@ async function addPlayer() {
   showLoading('Toevoegen…');
   
   try {
-    // Bestaat de speler al in de centrale database?
     let { data: existingPlayer, error: findError } = await sb
       .from('players')
       .select('id, name, email, rating')
@@ -1202,7 +1187,6 @@ async function addPlayer() {
       toast(`Nieuwe speler ${name} toegevoegd aan centrale database.`, 'success');
     }
     
-    // Koppel aan club
     const { error: memberError } = await sb
       .from('club_memberships')
       .upsert(
@@ -1226,7 +1210,7 @@ async function addPlayer() {
 }
 
 // =====================================================
-// ADMIN (ongewijzigd behalve deletePlayer)
+// ADMIN (ongewijzigd behalve CSV import)
 // =====================================================
 function adminTab(tab, btn) {
   ['spelers', 'importexport', 'instellingen'].forEach(t => {
@@ -1355,107 +1339,168 @@ async function deletePlayer() {
 }
 
 // =====================================================
-// IMPORT / EXPORT (AANGEPAST: CSV parse met centrale logica)
+// ROBUUSTE CSV IMPORT (verbeterd voor jouw bestand)
 // =====================================================
-function handleCSV(e) { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => parseCSV(ev.target.result); r.readAsText(f, 'utf-8'); }
-
-async function parseCSV(text) {
-  const lines = text.trim().split('\n').filter(l => l.trim());
-  if (lines.length < 2) { toast('CSV is leeg of heeft geen datarijen.', 'error'); return; }
-
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[^a-z]/g, ''));
-  const col = (row, names) => {
-    for (const n of names) {
-      const i = headers.indexOf(n);
-      if (i >= 0 && row[i] !== undefined) return row[i].trim();
+async function handleCSV(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (ev) => {
+    let content = ev.target.result;
+    // Verwijder BOM (byte order mark)
+    if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1);
+    
+    // Detecteer scheidingsteken (komma of puntkomma)
+    const firstLine = content.split(/\r?\n/)[0];
+    const delimiter = firstLine.includes(';') ? ';' : ',';
+    
+    // Splits in regels en verwijder lege regels
+    const lines = content.split(/\r?\n/).filter(l => l.trim() !== '');
+    if (lines.length < 2) {
+      toast('CSV is leeg of heeft geen datarijen.', 'error');
+      return;
     }
-    return '';
+    
+    // Eenvoudige split (jouw CSV heeft geen quotes of komma's binnen velden)
+    const rows = lines.map(line => line.split(delimiter).map(v => v.trim()));
+    await processCSV(rows);
   };
+  reader.readAsText(file, 'UTF-8');
+}
 
-  // Parse alle rijen eerst lokaal
-  const rows = [];
-  for (let i = 1; i < lines.length; i++) {
-    const row = lines[i].split(',');
-    const email = col(row, ['email', 'mail']).toLowerCase();
-    if (!email) continue;
-    const name = col(row, ['naam', 'name']);
-    rows.push({
-      email,
-      name: name || (email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())),
-      rating: Math.min(9, Math.max(1, parseFloat(col(row, ['rating', 'speelsterkte'])) || 9.0)),
-      matches_played: parseInt(col(row, ['wedstrijden', 'matches'])) || 0,
-      wins: parseInt(col(row, ['gewonnen', 'wins'])) || 0,
-    });
+async function processCSV(rows) {
+  // Normaliseer headers
+  const rawHeaders = rows[0];
+  const headers = rawHeaders.map(h => 
+    h.toLowerCase()
+     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+     .replace(/[^a-z]/g, '')
+  );
+  
+  // Zoek indices (flexibel)
+  const colIdx = (possibleNames) => {
+    for (const name of possibleNames) {
+      const idx = headers.findIndex(h => h === name);
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
+  
+  const nameIdx = colIdx(['naam', 'name']);
+  const emailIdx = colIdx(['email', 'mail']);
+  const ratingIdx = colIdx(['rating', 'speelsterkte']);
+  const matchesIdx = colIdx(['wedstrijden', 'matches', 'gespeeld']);
+  const winsIdx = colIdx(['gewonnen', 'wins', 'winst']);
+  
+  if (emailIdx === -1) {
+    toast('CSV mist een e‑mailkolom (gebruik kop: email, mail).', 'error');
+    return;
   }
-
-  if (!rows.length) { toast('Geen geldige rijen gevonden (e-mail verplicht).', 'error'); return; }
-
-  showLoading(`0 / ${rows.length} spelers importeren…`);
-
+  if (nameIdx === -1) {
+    toast('CSV mist een naamkolom (gebruik kop: naam, name).', 'error');
+    return;
+  }
+  
+  // Verzamel geldige rijen
+  const parsed = [];
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.length === 0) continue;
+    const email = row[emailIdx]?.trim().toLowerCase();
+    if (!email) continue; // regel zonder email overslaan
+    
+    let name = row[nameIdx]?.trim();
+    if (!name) name = email.split('@')[0]; // fallback
+    
+    let rating = parseFloat(String(row[ratingIdx] || '9.0').replace(',', '.'));
+    if (isNaN(rating)) rating = 9.0;
+    rating = Math.min(9.0, Math.max(1.0, rating)); // tussen 1 en 9
+    
+    let matches_played = parseInt(row[matchesIdx]) || 0;
+    let wins = parseInt(row[winsIdx]) || 0;
+    if (wins > matches_played) wins = matches_played;
+    
+    parsed.push({ email, name, rating, matches_played, wins });
+  }
+  
+  if (parsed.length === 0) {
+    toast('Geen geldige spelers gevonden in CSV (minimaal e‑mail verplicht).', 'error');
+    return;
+  }
+  
+  showLoading(`0 / ${parsed.length} spelers importeren…`);
+  
   try {
-    // Stap 1: haal alle bestaande spelers op via email (één query)
-    const emails = rows.map(r => r.email);
+    const emails = parsed.map(p => p.email);
     const { data: existing, error: fetchErr } = await sb
       .from('players')
       .select('id, email')
       .in('email', emails);
     if (fetchErr) throw fetchErr;
-
+    
     const existingMap = new Map((existing || []).map(p => [p.email, p.id]));
-
-    // Stap 2: splits in nieuwe en bestaande spelers
-    const toInsert = rows.filter(r => !existingMap.has(r.email));
-    const toUpdate = rows.filter(r => existingMap.has(r.email));
-
-    document.getElementById('loading-text').textContent = `Spelers verwerken…`;
-
-    // Stap 3: batch insert nieuwe spelers
+    const toInsert = parsed.filter(p => !existingMap.has(p.email));
+    const toUpdate = parsed.filter(p => existingMap.has(p.email));
+    
+    // Nieuwe spelers toevoegen
     let insertedIds = [];
-    if (toInsert.length > 0) {
+    if (toInsert.length) {
       const { data: inserted, error: insertErr } = await sb
         .from('players')
-        .insert(toInsert.map(r => ({ name: r.name, email: r.email, rating: r.rating, matches_played: r.matches_played, wins: r.wins })))
+        .insert(toInsert.map(p => ({
+          name: p.name,
+          email: p.email,
+          rating: p.rating,
+          matches_played: p.matches_played,
+          wins: p.wins
+        })))
         .select('id, email');
       if (insertErr) throw insertErr;
       insertedIds = inserted || [];
       insertedIds.forEach(p => existingMap.set(p.email, p.id));
     }
-
-    // Stap 4: batch update bestaande spelers (max 50 tegelijk)
-    const CHUNK = 50;
-    for (let i = 0; i < toUpdate.length; i += CHUNK) {
-      const chunk = toUpdate.slice(i, i + CHUNK);
-      document.getElementById('loading-text').textContent = `Bijwerken ${i + chunk.length} / ${toUpdate.length}…`;
-      await Promise.all(chunk.map(r =>
-        sb.from('players').update({ name: r.name, rating: r.rating, matches_played: r.matches_played, wins: r.wins }).eq('email', r.email)
+    
+    // Bestaande spelers bijwerken in batches
+    const BATCH_SIZE = 15;
+    for (let i = 0; i < toUpdate.length; i += BATCH_SIZE) {
+      const batch = toUpdate.slice(i, i + BATCH_SIZE);
+      document.getElementById('loading-text').textContent = `Bijwerken ${i + batch.length} / ${toUpdate.length}…`;
+      await Promise.all(batch.map(p =>
+        sb.from('players').update({
+          name: p.name,
+          rating: p.rating,
+          matches_played: p.matches_played,
+          wins: p.wins
+        }).eq('email', p.email)
       ));
     }
-
-    // Stap 5: batch upsert memberships
-    document.getElementById('loading-text').textContent = `Koppelen aan club…`;
-    const memberships = rows
-      .map(r => ({ player_id: existingMap.get(r.email), club_id: currentClubId }))
+    
+    // Koppel alle spelers aan club
+    const memberships = parsed
+      .map(p => ({ player_id: existingMap.get(p.email), club_id: currentClubId }))
       .filter(m => m.player_id);
-
-    for (let i = 0; i < memberships.length; i += CHUNK) {
-      const chunk = memberships.slice(i, i + CHUNK);
+    
+    for (let i = 0; i < memberships.length; i += BATCH_SIZE) {
+      const batch = memberships.slice(i, i + BATCH_SIZE);
       const { error: memberErr } = await sb
         .from('club_memberships')
-        .upsert(chunk, { onConflict: 'player_id,club_id' });
+        .upsert(batch, { onConflict: 'player_id,club_id' });
       if (memberErr) throw memberErr;
     }
-
+    
     await loadAll();
     hideLoading();
-    toast(`✅ ${toInsert.length} nieuw · ${toUpdate.length} bijgewerkt · ${memberships.length} gekoppeld`, 'success');
-
-  } catch(e) {
+    toast(`✅ ${toInsert.length} nieuw, ${toUpdate.length} bijgewerkt, ${memberships.length} gekoppeld`, 'success');
+  } catch (err) {
     hideLoading();
-    toast('Import fout: ' + e.message, 'error');
-    console.error('CSV import fout:', e);
+    toast('Import mislukt: ' + err.message, 'error');
+    console.error(err);
   }
 }
 
+// =====================================================
+// EXPORT FUNCTIES
+// =====================================================
 function exportCSV() {
   const rows = [['naam', 'email', 'rating', 'wedstrijden', 'gewonnen', 'niveau']];
   [...players].sort((a,b) => a.rating - b.rating).forEach(p => rows.push([p.name, p.email || '', p.rating.toFixed(2), p.matches_played, p.wins, level(p.rating)]));
@@ -1503,7 +1548,7 @@ async function resetAll() {
 }
 
 // =====================================================
-// HISTORIE (ongewijzigd)
+// HISTORIE
 // =====================================================
 function renderHistory() {
   const list = document.getElementById('history-list');
@@ -1551,7 +1596,7 @@ const dz = document.getElementById('drop-zone');
 if (dz) {
   dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
   dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
-  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('dragover'); const f = e.dataTransfer.files[0]; if (f?.name.endsWith('.csv')) { const r = new FileReader(); r.onload = ev => parseCSV(ev.target.result); r.readAsText(f, 'utf-8'); } });
+  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('dragover'); const f = e.dataTransfer.files[0]; if (f?.name.endsWith('.csv')) { const r = new FileReader(); r.onload = ev => { const content = ev.target.result; if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1); const firstLine = content.split(/\r?\n/)[0]; const delimiter = firstLine.includes(';') ? ';' : ','; const lines = content.split(/\r?\n/).filter(l => l.trim() !== ''); const rows = lines.map(line => line.split(delimiter).map(v => v.trim())); processCSV(rows); }; r.readAsText(f, 'UTF-8'); } });
 }
 document.querySelectorAll('.modal-overlay').forEach(el => el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); }));
 
@@ -1575,39 +1620,8 @@ async function checkExistingLogin() {
 }
 
 // =====================================================
-// VERBINDINGSTEST BIJ OPSTARTEN
-// =====================================================
-async function testConnection() {
-  const statusEl = document.getElementById('login-db-status');
-  if (!statusEl) return;
-  statusEl.style.display = 'block';
-  statusEl.style.color = 'var(--text3)';
-  statusEl.textContent = '⏳ Verbinding testen…';
-  try {
-    const { data, error } = await sb.from('clubs').select('slug, name').limit(5);
-    if (error) {
-      statusEl.style.color = 'var(--danger)';
-      statusEl.innerHTML = `❌ Database fout: ${error.message} (code: ${error.code})`;
-      return;
-    }
-    if (!data || data.length === 0) {
-      statusEl.style.color = 'var(--warn)';
-      statusEl.innerHTML = `⚠️ Verbinding OK, maar geen clubs gevonden in database.<br>Voer het SQL-script uit in Supabase om de testclub aan te maken.`;
-      return;
-    }
-    const clubNames = data.map(c => c.slug).join(', ');
-    statusEl.style.color = 'var(--accent)';
-    statusEl.innerHTML = `✅ Verbonden · Beschikbare clubs: <strong>${clubNames}</strong>`;
-  } catch (e) {
-    statusEl.style.color = 'var(--danger)';
-    statusEl.textContent = `❌ Verbinding mislukt: ${e.message}`;
-  }
-}
-
-// =====================================================
 // START
 // =====================================================
-testConnection();
 checkExistingLogin();
 </script>
 </body>
