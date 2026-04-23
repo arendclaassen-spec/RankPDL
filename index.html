@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -447,7 +446,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 <div class="modal-overlay" id="modal-reset">
   <div class="modal">
     <div class="modal-title">Alle data verwijderen?</div>
-    <p style="color:var(--text2);font-size:14px;line-height:1.6">Dit verwijdert alle wedstrijden van deze club uit de database. Spelers blijven bestaan in het centrale systeem.</p>
+    <p style="color:var(--text2);font-size:14px;line-height:1.6">Dit verwijdert alle wedstrijden <strong>en alle spelers</strong> uit deze club. Spelers en hun gegevens blijven bestaan in de centrale database — importeer de CSV opnieuw om ze terug te zetten.</p>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal('modal-reset')">Annuleren</button>
       <button class="btn btn-danger" onclick="resetAll()">Verwijder alles</button>
@@ -1414,9 +1413,9 @@ async function parseCSV(text) {
     rows.push({
       email,
       name: name || (email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())),
-      rating: Math.min(9, Math.max(1, parseFloat(col(row, ['rating', 'speelsterkte'])) || 9.0)),
-      matches_played: parseInt(col(row, ['wedstrijden', 'matches'])) || 0,
-      wins: parseInt(col(row, ['gewonnen', 'wins'])) || 0,
+      rating: 9.0, // altijd 9.00 bij import
+      matches_played: 0,
+      wins: 0,
     });
   }
 
@@ -1521,29 +1520,38 @@ function dl(rows, fn) {
 function today() { return new Date().toISOString().slice(0,10); }
 
 async function resetAll() {
-  if (!confirm('WAARSCHUWING: Dit verwijdert ALLE wedstrijden van deze club! Spelers blijven bestaan in de centrale database.')) return;
-  
-  showLoading('Wedstrijden verwijderen…');
+  showLoading('Alles verwijderen…');
   try {
-    // Directe REST DELETE is veel sneller dan supabase-js voor grote datasets
-    const res = await fetch(`${SUPA_URL}/rest/v1/matches?club_id=eq.${currentClubId}`, {
-      method: 'DELETE',
-      headers: {
-        'apikey': SUPA_KEY,
-        'Authorization': `Bearer ${SUPA_KEY}`,
-        'Prefer': 'return=minimal'
-      }
-    });
-    if (!res.ok) throw new Error(await res.text());
+    const headers = {
+      'apikey': SUPA_KEY,
+      'Authorization': `Bearer ${SUPA_KEY}`,
+      'Prefer': 'return=minimal'
+    };
 
-    await restFetch('POST', 'club_settings?on_conflict=club_id,key', 
+    // Verwijder alle wedstrijden van deze club
+    document.getElementById('loading-text').textContent = 'Wedstrijden verwijderen…';
+    const r1 = await fetch(`${SUPA_URL}/rest/v1/matches?club_id=eq.${currentClubId}`, { method: 'DELETE', headers });
+    if (!r1.ok) throw new Error(await r1.text());
+
+    // Verwijder alle speler-koppelingen van deze club
+    document.getElementById('loading-text').textContent = 'Spelers ontkoppelen…';
+    const r2 = await fetch(`${SUPA_URL}/rest/v1/club_memberships?club_id=eq.${currentClubId}`, { method: 'DELETE', headers });
+    if (!r2.ok) throw new Error(await r2.text());
+
+    // Reset promotie teller
+    await restFetch('POST', 'club_settings?on_conflict=club_id%2Ckey',
       [{ club_id: currentClubId, key: 'promos', value: '0' }]);
     promos = 0;
-    await loadAll();
+
+    players = [];
+    matches = [];
+    renderRanking();
+    renderPlayers();
+    renderHistory();
     closeModal('modal-reset');
-    toast('Alle wedstrijden van deze club verwijderd.', 'info');
-  } catch(e) { toast('Fout: ' + e.message, 'error'); }
-  hideLoading();
+    hideLoading();
+    toast('Alle data van deze club verwijderd. Importeer de CSV om spelers terug te zetten.', 'info');
+  } catch(e) { hideLoading(); toast('Fout: ' + e.message, 'error'); }
 }
 
 // =====================================================
