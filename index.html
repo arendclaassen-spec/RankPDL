@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -1425,36 +1424,49 @@ async function parseCSV(text) {
   showLoading(`Bezig met importeren van ${rows.length} spelers…`);
 
   try {
-    const CHUNK = 100; // Klein genoeg voor stabiele requests
-
-    // Stap 1: upsert alle spelers in één keer op email conflict
-    // Dit maakt nieuwe aan EN update bestaande in één operatie
-    let allPlayerIds = [];
+    const CHUNK = 100;
     const total = rows.length;
+
+    // Stap 1: upsert alle spelers (aanmaken of updaten op email)
     for (let i = 0; i < rows.length; i += CHUNK) {
       const chunk = rows.slice(i, i + CHUNK);
       const pct = Math.round(((i + chunk.length) / total) * 100);
-      document.getElementById('loading-text').textContent = `Spelers verwerken ${i + chunk.length} / ${total} (${pct}%)…`;
-      const inserted = await restFetch('POST', 'players?on_conflict=email&select=id,email', chunk.map(r => ({
+      document.getElementById('loading-text').textContent = `Spelers opslaan ${i + chunk.length} / ${total} (${pct}%)…`;
+      await restFetch('POST', 'players?on_conflict=email', chunk.map(r => ({
         name: r.name, email: r.email, rating: r.rating,
         matches_played: r.matches_played, wins: r.wins
       })));
-      (inserted || []).forEach(p => allPlayerIds.push({ email: p.email, id: p.id }));
     }
 
-    // Stap 2: koppel alle spelers aan club
-    document.getElementById('loading-text').textContent = `Koppelen aan club…`;
-    const memberships = allPlayerIds.map(p => ({ player_id: p.id, club_id: currentClubId }));
+    // Stap 2: haal alle IDs op via email (paginering, 1000 per keer)
+    document.getElementById('loading-text').textContent = 'Speler-IDs ophalen…';
+    const emails = rows.map(r => r.email);
+    const emailMap = new Map(); // email -> id
+    let offset = 0;
+    while (true) {
+      const batch = await restFetch('GET', `players?select=id,email&limit=1000&offset=${offset}`);
+      if (!batch || batch.length === 0) break;
+      batch.forEach(p => { if (emails.includes(p.email)) emailMap.set(p.email, p.id); });
+      if (batch.length < 1000) break;
+      offset += 1000;
+    }
+
+    // Stap 3: memberships aanmaken voor gevonden spelers
+    document.getElementById('loading-text').textContent = 'Koppelen aan club…';
+    const memberships = emails
+      .filter(e => emailMap.has(e))
+      .map(e => ({ player_id: emailMap.get(e), club_id: currentClubId }));
+
     for (let i = 0; i < memberships.length; i += CHUNK) {
       const chunk = memberships.slice(i, i + CHUNK);
       const pct = Math.round(((i + chunk.length) / memberships.length) * 100);
-      document.getElementById('loading-text').textContent = `Koppelen aan club ${i + chunk.length} / ${memberships.length} (${pct}%)…`;
+      document.getElementById('loading-text').textContent = `Koppelen ${i + chunk.length} / ${memberships.length} (${pct}%)…`;
       await restFetch('POST', 'club_memberships?on_conflict=player_id%2Cclub_id', chunk);
     }
 
     await loadAll();
     hideLoading();
-    toast(`✅ ${allPlayerIds.length} spelers verwerkt en gekoppeld aan club`, 'success');
+    toast(`✅ ${memberships.length} / ${total} spelers gekoppeld aan club`, 'success');
 
   } catch(e) {
     hideLoading();
