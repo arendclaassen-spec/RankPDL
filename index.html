@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -1379,13 +1380,20 @@ function handleCSV(e) { const f = e.target.files[0]; if (!f) return; const r = n
 // DIRECTE REST HELPER (omzeilt supabase-js headers/preflight)
 // =====================================================
 async function restFetch(method, path, body) {
+  // Bepaal Prefer header: upsert paths krijgen merge-duplicates
+  const isUpsert = path.includes('on_conflict');
+  const preferParts = [];
+  if (isUpsert) preferParts.push('resolution=merge-duplicates');
+  if (method === 'POST' && !isUpsert) preferParts.push('return=representation');
+  if (method === 'DELETE') preferParts.push('return=minimal');
+
   const res = await fetch(`${SUPA_URL}/rest/v1/${path}`, {
     method,
     headers: {
       'apikey': SUPA_KEY,
       'Authorization': `Bearer ${SUPA_KEY}`,
       'Content-Type': 'application/json',
-      'Prefer': method === 'POST' ? 'return=representation' : 'return=minimal'
+      ...(preferParts.length ? { 'Prefer': preferParts.join(',') } : {})
     },
     body: body ? JSON.stringify(body) : undefined
   });
@@ -1393,8 +1401,9 @@ async function restFetch(method, path, body) {
     const err = await res.text();
     throw new Error(`${method} ${path} → ${res.status}: ${err}`);
   }
-  if (method === 'GET' || (method === 'POST' && res.headers.get('content-type')?.includes('json'))) {
-    return res.json();
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('json') && res.status !== 204) {
+    try { return await res.json(); } catch { return null; }
   }
   return null;
 }
@@ -1467,7 +1476,7 @@ async function parseCSV(text) {
       document.getElementById('loading-text').textContent = `${toUpdate.length} bestaande spelers bijwerken…`;
       for (let i = 0; i < toUpdate.length; i += CHUNK) {
         const chunk = toUpdate.slice(i, i + CHUNK);
-        await restFetch('POST', 'players?on_conflict=email', chunk.map(r => ({
+        await restFetch('POST', 'players?on_conflict=email&resolution=merge-duplicates', chunk.map(r => ({
           id: existingMap.get(r.email),
           name: r.name, email: r.email, rating: r.rating,
           matches_played: r.matches_played, wins: r.wins
@@ -1483,7 +1492,7 @@ async function parseCSV(text) {
 
     for (let i = 0; i < memberships.length; i += CHUNK) {
       const chunk = memberships.slice(i, i + CHUNK);
-      await restFetch('POST', 'club_memberships?on_conflict=player_id,club_id', chunk);
+      await restFetch('POST', 'club_memberships?on_conflict=player_id%2Cclub_id', chunk);
     }
 
     await loadAll();
@@ -1531,10 +1540,21 @@ function today() { return new Date().toISOString().slice(0,10); }
 async function resetAll() {
   if (!confirm('WAARSCHUWING: Dit verwijdert ALLE wedstrijden van deze club! Spelers blijven bestaan in de centrale database.')) return;
   
-  showLoading('Verwijderen…');
+  showLoading('Wedstrijden verwijderen…');
   try {
-    await sb.from('matches').delete().eq('club_id', currentClubId);
-    await sb.from('club_settings').upsert({ club_id: currentClubId, key: 'promos', value: '0' });
+    // Directe REST DELETE is veel sneller dan supabase-js voor grote datasets
+    const res = await fetch(`${SUPA_URL}/rest/v1/matches?club_id=eq.${currentClubId}`, {
+      method: 'DELETE',
+      headers: {
+        'apikey': SUPA_KEY,
+        'Authorization': `Bearer ${SUPA_KEY}`,
+        'Prefer': 'return=minimal'
+      }
+    });
+    if (!res.ok) throw new Error(await res.text());
+
+    await restFetch('POST', 'club_settings?on_conflict=club_id,key', 
+      [{ club_id: currentClubId, key: 'promos', value: '0' }]);
     promos = 0;
     await loadAll();
     closeModal('modal-reset');
