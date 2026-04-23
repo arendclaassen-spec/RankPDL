@@ -1458,7 +1458,7 @@ async function parseCSV(text) {
       document.getElementById('loading-text').textContent = `${toUpdate.length} bestaande spelers bijwerken…`;
       for (let i = 0; i < toUpdate.length; i += CHUNK) {
         const chunk = toUpdate.slice(i, i + CHUNK);
-        await restFetch('POST', 'players?on_conflict=email&resolution=merge-duplicates', chunk.map(r => ({
+        await restFetch('POST', 'players?on_conflict=email', chunk.map(r => ({
           id: existingMap.get(r.email),
           name: r.name, email: r.email, rating: r.rating,
           matches_played: r.matches_played, wins: r.wins
