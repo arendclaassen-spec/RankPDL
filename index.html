@@ -721,44 +721,27 @@ async function loadAll() {
   showLoading('Data laden…');
   
   try {
-    const { data: members, error: membersError } = await sb
-      .from('club_memberships')
-      .select('player_id')
-      .eq('club_id', currentClubId);
-    
-    if (membersError) throw membersError;
-    const playerIds = members.map(m => m.player_id);
-    
-    if (playerIds.length > 0) {
-      const { data: playersData, error: playersError } = await sb
-        .from('players')
-        .select('*')
-        .in('id', playerIds);
-      if (playersError) throw playersError;
-      players = playersData || [];
-    } else {
-      players = [];
-    }
-    
-    const { data: matchesData, error: matchesError } = await sb
-      .from('matches')
-      .select('*')
-      .eq('club_id', currentClubId)
-      .order('played_at', { ascending: false });
-    if (matchesError) throw matchesError;
+    // Haal spelers op via REST JOIN (één query, geen URL-lengte probleem)
+    document.getElementById('loading-text').textContent = 'Spelers laden…';
+    const playersData = await restFetch('GET',
+      `players?select=*,club_memberships!inner(club_id)&club_memberships.club_id=eq.${currentClubId}&limit=10000`
+    );
+    players = (playersData || []).map(p => { const {club_memberships, ...rest} = p; return rest; });
+
+    document.getElementById('loading-text').textContent = 'Wedstrijden laden…';
+    const matchesData = await restFetch('GET',
+      `matches?club_id=eq.${currentClubId}&order=played_at.desc&limit=1000`
+    );
     matches = matchesData || [];
-    
-    const { data: settings, error: settingsError } = await sb
+
+    // Settings via supabase-js (klein, geen probleem)
+    const { data: settings } = await sb
       .from('club_settings')
       .select('value')
       .eq('club_id', currentClubId)
       .eq('key', 'promos')
-      .single();
-    if (!settingsError && settings) {
-      promos = parseInt(settings.value) || 0;
-    } else {
-      promos = 0;
-    }
+      .maybeSingle();
+    promos = settings ? (parseInt(settings.value) || 0) : 0;
     
     console.log(`✅ Geladen: ${players.length} spelers, ${matches.length} wedstrijden`);
     
