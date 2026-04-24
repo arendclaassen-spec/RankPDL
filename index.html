@@ -721,12 +721,20 @@ async function loadAll() {
   showLoading('Data laden…');
   
   try {
-    // Haal spelers op via REST JOIN (één query, geen URL-lengte probleem)
+    // Haal spelers op via paginering (1000 per keer, geen limiet)
     document.getElementById('loading-text').textContent = 'Spelers laden…';
-    const playersData = await restFetch('GET',
-      `players?select=*,club_memberships!inner(club_id)&club_memberships.club_id=eq.${currentClubId}&limit=10000`
-    );
-    players = (playersData || []).map(p => { const {club_memberships, ...rest} = p; return rest; });
+    players = [];
+    let loadOffset = 0;
+    while (true) {
+      const batch = await fetch(
+        `${SUPA_URL}/rest/v1/players?select=*,club_memberships!inner(club_id)&club_memberships.club_id=eq.${currentClubId}&limit=1000&offset=${loadOffset}`,
+        { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+      ).then(r => r.json());
+      if (!batch || batch.length === 0) break;
+      batch.forEach(p => { const {club_memberships, ...rest} = p; players.push(rest); });
+      if (batch.length < 1000) break;
+      loadOffset += 1000;
+    }
 
     document.getElementById('loading-text').textContent = 'Wedstrijden laden…';
     const matchesData = await restFetch('GET',
