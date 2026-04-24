@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -1451,14 +1452,23 @@ async function parseCSV(text) {
       }
     }
 
-    // Stap 2: haal alle IDs op in één keer (Range header heft limiet op)
+    // Stap 2: haal alle IDs op via paginering van 1000 per keer
     document.getElementById('loading-text').textContent = 'Speler-IDs ophalen…';
     const emails = rows.map(r => r.email);
     const emailSet = new Set(emails);
-    const emailMap = new Map(); // email -> id
-    const allPlayers = await restFetch('GET', 'players?select=id,email');
-    (allPlayers || []).forEach(p => { if (emailSet.has(p.email)) emailMap.set(p.email, p.id); });
-    console.log(`IDs gevonden: ${emailMap.size} van ${emails.length}`);
+    const emailMap = new Map();
+    let offset = 0;
+    while (true) {
+      const batch = await fetch(`${SUPA_URL}/rest/v1/players?select=id,email&limit=1000&offset=${offset}`, {
+        headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+      }).then(r => r.json());
+      if (!batch || batch.length === 0) break;
+      batch.forEach(p => { if (emailSet.has(p.email)) emailMap.set(p.email, p.id); });
+      console.log(`Pagina ${offset/1000 + 1}: ${batch.length} spelers, ${emailMap.size} gevonden`);
+      if (batch.length < 1000) break;
+      offset += 1000;
+    }
+    console.log(`Totaal IDs gevonden: ${emailMap.size} van ${emails.length}`);
 
     // Stap 3: memberships aanmaken voor gevonden spelers
     document.getElementById('loading-text').textContent = 'Koppelen aan club…';
